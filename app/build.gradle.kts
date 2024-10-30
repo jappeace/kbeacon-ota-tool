@@ -38,8 +38,15 @@ android {
         compose = true
     }
 }
-
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+}
 dependencies {
+
+    
+        implementation("com.kkmcn.kbeaconlib2:kbeaconlib2:1.2.8")
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
