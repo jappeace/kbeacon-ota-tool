@@ -102,7 +102,7 @@ class MainActivity : ComponentActivity() {
                                 connPara.readTriggerPara = false
                                 connPara.readSensorPara = false
                                 beacon.connectEnhanced("0000000000000000", 5000, connPara, ConnState(advPeriod));
-                                break;
+                                
                             }
                         }
                     },
