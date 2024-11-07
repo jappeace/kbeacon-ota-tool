@@ -19,3 +19,9 @@ should be able to easily modify this to any desired setting.
 4. set your desired adv interval
 4. press start scanning.
 
+
+## Resources
+most code is copied from:
+https://github.com/kkmhogen/KBeaconProDemo_Android
+
+(it was a bit haphazzard, this provides a full build).
