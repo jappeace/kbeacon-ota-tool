@@ -33,6 +33,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.example.kbeaconpro.ui.theme.KbeaconproTheme
 import com.kkmcn.kbeaconlib2.KBConnPara
+import com.kkmcn.kbeaconlib2.KBConnState
 import com.kkmcn.kbeaconlib2.KBeacon
 import com.kkmcn.kbeaconlib2.KBeaconsMgr
 import kotlinx.coroutines.Dispatchers
@@ -102,7 +103,11 @@ class MainActivity : ComponentActivity() {
                                 connPara.readTriggerPara = false
                                 connPara.readSensorPara = false
                                 beacon.connectEnhanced("0000000000000000", 5000, connPara, ConnState(advPeriod));
-                                
+                                while(beacon.state != KBConnState.Disconnected){
+                                    delay(50);
+                                    Log.v(TAG, "awaiting disconnect" + beacon.mac)
+                                }
+
                             }
                         }
                     },
