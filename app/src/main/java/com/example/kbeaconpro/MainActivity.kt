@@ -44,6 +44,7 @@ import java.util.concurrent.LinkedBlockingQueue
 class MainActivity : ComponentActivity() {
     val TAG="MainActivity"
     var beaconManager: KBeaconsMgr? = null
+    var advPeriod : Float = 1000.0F
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -73,6 +74,7 @@ class MainActivity : ComponentActivity() {
                 }
                 NumberInputField(onValueChange = {input ->
                     Log.d(TAG, "tax val" + input)
+                    advPeriod =  input.toFloat()
                 })
                 Button(
                     onClick = {
@@ -99,7 +101,7 @@ class MainActivity : ComponentActivity() {
                                 connPara.readSlotPara = true
                                 connPara.readTriggerPara = false
                                 connPara.readSensorPara = false
-                                beacon.connectEnhanced("0000000000000000", 5000, connPara, ConnState());
+                                beacon.connectEnhanced("0000000000000000", 5000, connPara, ConnState(advPeriod));
                                 break;
                             }
                         }

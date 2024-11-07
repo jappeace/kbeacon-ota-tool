@@ -1,18 +1,26 @@
 package com.example.kbeaconpro
 
 import android.util.Log
-import androidx.core.content.PackageManagerCompat.LOG_TAG
 import com.kkmcn.kbeaconlib2.KBConnState
 import com.kkmcn.kbeaconlib2.KBConnectionEvent
 import com.kkmcn.kbeaconlib2.KBeacon
 import com.kkmcn.kbeaconlib2.KBeacon.ConnStateDelegate
 
 
-class ConnState : ConnStateDelegate {
+class ConnState(val advertisePeriod : Float) : ConnStateDelegate {
     val TAG = "ConnState"
     override fun onConnStateChange(beacon: KBeacon?, state: KBConnState?, nReason: Int) {
         if (state == KBConnState.Connected) {
             Log.i(TAG, "device has connected")
+            val oldCfgPara = beacon!!.getSlotCfg(0)
+            oldCfgPara.setAdvPeriod(advertisePeriod)
+            beacon.modifyConfig(oldCfgPara) { bConfigSuccess, error ->
+                if (bConfigSuccess) {
+                    Log.i(TAG,"Enable encrypt advertisement success")
+                } else {
+                    Log.i(TAG,"Enable encrypt advertisement failed:" + error.errorCode)
+                }
+            }
             beacon!!.disconnect()
         } else if (state == KBConnState.Connecting) {
             Log.i(TAG, "device start connecting")
