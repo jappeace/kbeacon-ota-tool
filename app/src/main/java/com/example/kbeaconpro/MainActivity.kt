@@ -17,6 +17,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -26,15 +27,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.example.kbeaconpro.ui.theme.KbeaconproTheme
+import com.kkmcn.kbeaconlib2.KBAdvPackage.KBAdvPacketEddyUID
+import com.kkmcn.kbeaconlib2.KBAdvPackage.KBAdvType
 import com.kkmcn.kbeaconlib2.KBConnPara
 import com.kkmcn.kbeaconlib2.KBConnState
 import com.kkmcn.kbeaconlib2.KBeacon
+import com.kkmcn.kbeaconlib2.KBeacon.ConnStateDelegate
 import com.kkmcn.kbeaconlib2.KBeaconsMgr
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -46,6 +49,8 @@ class MainActivity : ComponentActivity() {
     val TAG="MainActivity"
     var beaconManager: KBeaconsMgr? = null
     var advPeriod : Float = 1000.0F
+    var isWriting : Boolean = true
+    var sendLogUri : String = "";
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,7 +67,6 @@ class MainActivity : ComponentActivity() {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Greeting(name = "Android")
 
                 Button(
                     onClick = {
@@ -73,10 +77,13 @@ class MainActivity : ComponentActivity() {
                 ) {
                     Text("Requst permissions")
                 }
+                Text("rssi to check or write")
                 NumberInputField(onValueChange = {input ->
                     Log.d(TAG, "tax val" + input)
                     advPeriod =  input.toFloat()
                 })
+                Text("enable writing")
+                SwitchMinimal(onValueChange = { input -> isWriting = input }, onUriChange = { input -> sendLogUri = input })
                 Button(
                     onClick = {
         val nStartScan: Int = beaconManager!!.startScanning()
@@ -96,17 +103,27 @@ class MainActivity : ComponentActivity() {
                                     continue;
                                 }
                                 Log.v(TAG, "connecting to mac:" + beacon.mac)
-                                val connPara = KBConnPara()
-                                connPara.syncUtcTime = true
-                                connPara.readCommPara = true
-                                connPara.readSlotPara = true
-                                connPara.readTriggerPara = false
-                                connPara.readSensorPara = false
-                                beacon.connectEnhanced("0000000000000000", 5000, connPara, ConnState(advPeriod));
-                                while(beacon.state != KBConnState.Disconnected){
-                                    delay(50);
-                                    Log.v(TAG, "awaiting disconnect" + beacon.mac)
+                                var  delegate :  ConnStateDelegate = SetAdvPeriodState(advPeriod)
+                                if(!isWriting) {
+                                     delegate = ReportAdvPeriodState(advPeriod, sendLogUri)
                                 }
+                                    val connPara = KBConnPara()
+                                    connPara.syncUtcTime = true
+                                    connPara.readCommPara = true
+                                    connPara.readSlotPara = true
+                                    connPara.readTriggerPara = false
+                                    connPara.readSensorPara = false
+                                    beacon.connectEnhanced(
+                                        "0000000000000000",
+                                        5000,
+                                        connPara,
+                                        delegate
+                                    );
+                                    while (beacon.state != KBConnState.Disconnected) {
+                                        delay(50);
+                                        Log.v(TAG, "awaiting disconnect" + beacon.mac)
+                                    }
+
 
                             }
                         }
@@ -160,23 +177,6 @@ fun permissions(){
 }
 
 @Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-    Text(
-        text = "Hello $name!",
-        modifier = modifier
-    )
-}
-
-
-@Preview(showBackground = true)
-@Composable
-fun GreetingPreview() {
-    KbeaconproTheme {
-        Greeting("Android")
-    }
-}
-
-@Composable
 fun NumberInputField(
     onValueChange: (String) -> Unit
 ) {
@@ -196,4 +196,32 @@ fun NumberInputField(
             keyboardType = KeyboardType.Number
         )
     )
+}
+
+@Composable
+fun SwitchMinimal(    onValueChange: (Boolean) -> Unit, onUriChange: (String) -> Unit) {
+    var checked by remember { mutableStateOf(true) }
+    var uriText by remember { mutableStateOf("") }
+
+    Switch(
+        checked = checked,
+        onCheckedChange = {
+            checked = it
+            onValueChange(it)
+        }
+    )
+    if(! checked){
+        Text("send check results url")
+        OutlinedTextField(
+            value = uriText,
+            onValueChange = { input ->
+                uriText = input  // Update internal state
+                onUriChange(input);
+            },
+            label = { Text("Enter url") },
+            keyboardOptions = KeyboardOptions.Default.copy(
+                keyboardType = KeyboardType.Uri
+            )
+        )
+    }
 }

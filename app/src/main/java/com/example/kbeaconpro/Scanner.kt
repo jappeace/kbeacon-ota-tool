@@ -71,6 +71,7 @@ class Scanner(val queue : LinkedBlockingQueue<KBeacon>)  : KBeaconMgrDelegate {
 
                             KBAdvType.EddyTLM -> {
                                 val advTLM = advPacket as KBAdvPacketEddyTLM
+
                                 Log.v(TAG, "TLM battery:" + advTLM.batteryLevel)
                                 Log.v(TAG, "TLM Temperature:" + advTLM.temperature)
                                 Log.v(TAG, "TLM adv count:" + advTLM.advCount)
@@ -84,6 +85,7 @@ class Scanner(val queue : LinkedBlockingQueue<KBeacon>)  : KBeaconMgrDelegate {
                                 val advUID = advPacket as KBAdvPacketEddyUID
                                 Log.v(TAG, "UID Nid:" + advUID.nid)
                                 Log.v(TAG, "UID Sid:" + advUID.sid)
+
                                 if(queue.remainingCapacity() > 1){
                                     queue.put(beacon)
                                     Log.v(TAG, "added");
@@ -107,6 +109,7 @@ class Scanner(val queue : LinkedBlockingQueue<KBeacon>)  : KBeaconMgrDelegate {
 
                             KBAdvType.EBeacon -> {
                                 val encryptAdv = advPacket as KBAdvPacketEBeacon
+
                                 Log.v(TAG, "System mac:" + encryptAdv.mac)
                                 Log.v(TAG, "Decrypt UUID:" + encryptAdv.uuid)
                                 Log.v(TAG, "ADV UTC:" + encryptAdv.utcSecCount)
@@ -117,8 +120,6 @@ class Scanner(val queue : LinkedBlockingQueue<KBeacon>)  : KBeaconMgrDelegate {
                         }
                     }
 
-                    //clear all scanned packet
-                    beacon.removeAdvPacket()
                 }
             }
 }

@@ -7,7 +7,7 @@ import com.kkmcn.kbeaconlib2.KBeacon
 import com.kkmcn.kbeaconlib2.KBeacon.ConnStateDelegate
 
 
-class ConnState(val advertisePeriod : Float) : ConnStateDelegate {
+class SetAdvPeriodState(val advertisePeriod : Float) : ConnStateDelegate {
     val TAG = "ConnState"
     override fun onConnStateChange(beacon: KBeacon?, state: KBConnState?, nReason: Int) {
         if (state == KBConnState.Connected) {
