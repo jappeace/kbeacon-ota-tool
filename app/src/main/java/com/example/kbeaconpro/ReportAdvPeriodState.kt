@@ -21,6 +21,7 @@ class ReportAdvPeriodState(val expected: Float, val to : String) : ConnStateDele
             }
             val period = oldCfgPara.advPeriod
             if(period != expected){
+                val thread = Thread( {
                 val logMsg = "incorrect adv period" + beacon.mac + " is "+ period.toString() + " expected " + expected
                 Log.i(TAG, logMsg)
                 // 1. Parse the String into a URL:
@@ -35,7 +36,8 @@ class ReportAdvPeriodState(val expected: Float, val to : String) : ConnStateDele
                     connection.doOutput = true
                     connection.connectTimeout = 5000  // Optional: set connection timeout (ms)
                     connection.readTimeout = 5000     // Optional: set read timeout (ms)
-
+                    connection.setRequestProperty("Content-Type", "text/plain;charset=utf-8")
+                    connection.setRequestProperty("Accept", "application/json")
                     // 3. Write some text to the request body:
                     val body = logMsg
                     connection.outputStream.use { outputStream ->
@@ -57,6 +59,9 @@ class ReportAdvPeriodState(val expected: Float, val to : String) : ConnStateDele
                 } finally {
                     connection.disconnect()
                 }
+                    
+                })
+                thread.start()
         }else{
             Log.i(TAG, "correct adv period" + beacon.mac)
         }
