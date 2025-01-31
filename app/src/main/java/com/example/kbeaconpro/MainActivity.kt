@@ -98,7 +98,7 @@ class MainActivity : ComponentActivity() {
                             Log.v(TAG, "Running background task on IO dispatcher: ${Thread.currentThread().name}");
                             while(beaconManager!!.isScanning() || (! queue.isEmpty())){
                                 val beacon = queue.poll();
-                                if(beacon == null){
+                                if(beacon == null || beacon.rssi<-50){
                                     delay(1)
                                     continue;
                                 }
