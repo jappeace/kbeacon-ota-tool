@@ -70,12 +70,12 @@ class MainActivity : ComponentActivity() {
 
                 Button(
                     onClick = {
-                        Log.d(TAG, "requestion permissions")
+                        Log.d(TAG, "requesting permissions")
                         permissions()
                     },
                     modifier = Modifier.padding(top = 16.dp)
                 ) {
-                    Text("Requst permissions")
+                    Text("Request permissions")
                 }
                 Text("rssi to check or write")
                 NumberInputField(onValueChange = {input ->
