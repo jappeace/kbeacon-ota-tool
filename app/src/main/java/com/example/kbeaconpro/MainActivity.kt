@@ -77,7 +77,7 @@ class MainActivity : ComponentActivity() {
                 ) {
                     Text("Request permissions")
                 }
-                Text("adv interval to check or write")
+                Text("adv interval to check or write (default 1000ms)")
                 NumberInputField(onValueChange = {input ->
                     Log.d(TAG, "tax val" + input)
                     advPeriod =  input.toFloat()
