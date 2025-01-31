@@ -70,12 +70,12 @@ class MainActivity : ComponentActivity() {
 
                 Button(
                     onClick = {
-                        Log.d(TAG, "requestion permissions")
+                        Log.d(TAG, "requesting permissions")
                         permissions()
                     },
                     modifier = Modifier.padding(top = 16.dp)
                 ) {
-                    Text("Requst permissions")
+                    Text("Request permissions")
                 }
                 Text("rssi to check or write")
                 NumberInputField(onValueChange = {input ->
@@ -98,7 +98,7 @@ class MainActivity : ComponentActivity() {
                             Log.v(TAG, "Running background task on IO dispatcher: ${Thread.currentThread().name}");
                             while(beaconManager!!.isScanning() || (! queue.isEmpty())){
                                 val beacon = queue.poll();
-                                if(beacon == null){
+                                if(beacon == null || beacon.rssi<-50){
                                     delay(1)
                                     continue;
                                 }
