@@ -11,8 +11,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
@@ -20,7 +23,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -42,6 +47,7 @@ import com.kkmcn.kbeaconlib2.KBeaconsMgr
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.concurrent.LinkedBlockingQueue
 
 
@@ -57,6 +63,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val queue = LinkedBlockingQueue<KBeacon>(50);
+        val resultQueue = LinkedBlockingQueue<String>(10);
+
         setContent {
             KbeaconproTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
@@ -105,7 +113,7 @@ class MainActivity : ComponentActivity() {
                                 Log.v(TAG, "connecting to mac:" + beacon.mac)
                                 var  delegate :  ConnStateDelegate = SetAdvPeriodState(advPeriod)
                                 if(!isWriting) {
-                                     delegate = ReportAdvPeriodState(advPeriod, sendLogUri)
+                                     delegate = ReportAdvPeriodState(advPeriod, sendLogUri, resultQueue)
                                 }
                                     val connPara = KBConnPara()
                                     connPara.syncUtcTime = true
@@ -133,6 +141,7 @@ class MainActivity : ComponentActivity() {
                     Text("start scanning")
                 }
 
+                ShowMacResults(resultQueue)
             }
                 }
             }
@@ -196,6 +205,36 @@ fun NumberInputField(
             keyboardType = KeyboardType.Number
         )
     )
+}
+
+@Composable
+fun ShowMacResults(
+    resultQueue:  LinkedBlockingQueue<String>
+){
+    val resultState = remember { mutableStateListOf<String>() }
+    LaunchedEffect(Unit) {
+        while (true) {
+            
+            val result = withContext(Dispatchers.IO) { resultQueue.take() }
+            if (result !in resultState) {
+                resultState.add(result)
+            }
+        }
+    }
+    Scaffold { _ ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize(),
+            contentPadding = PaddingValues(16.dp)
+        ) {
+            items(resultState) { message ->
+                Text(
+                    text = message,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+            }
+        }
+    }
 }
 
 @Composable

@@ -7,9 +7,10 @@ import com.kkmcn.kbeaconlib2.KBeacon
 import com.kkmcn.kbeaconlib2.KBeacon.ConnStateDelegate
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.LinkedBlockingQueue
 
 
-class ReportAdvPeriodState(val expected: Float, val to : String) : ConnStateDelegate {
+class ReportAdvPeriodState(val expected: Float, val to : String, val resultQueue: LinkedBlockingQueue<String>) : ConnStateDelegate {
     val TAG = "ConnState"
     override fun onConnStateChange(beacon: KBeacon?, state: KBConnState?, nReason: Int) {
         if (state == KBConnState.Connected) {
@@ -25,6 +26,7 @@ class ReportAdvPeriodState(val expected: Float, val to : String) : ConnStateDele
                 if(period == expected){
                   logMsg = "adv period " + beacon.mac + " is "+ period.toString() + " as expected"
                 }
+                    resultQueue.put(logMsg)
                 Log.i(TAG, logMsg)
                 // 1. Parse the String into a URL:
                 val url = URL(to)
