@@ -20,9 +20,11 @@ class ReportAdvPeriodState(val expected: Float, val to : String) : ConnStateDele
                 return
             }
             val period = oldCfgPara.advPeriod
-            if(period != expected){
                 val thread = Thread( {
-                val logMsg = "incorrect adv period" + beacon.mac + " is "+ period.toString() + " expected " + expected
+                var logMsg = "incorrect adv period " + beacon.mac + " is "+ period.toString() + " expected " + expected
+                if(period == expected){
+                  logMsg = "adv period " + beacon.mac + " is "+ period.toString() + " as expected"
+                }
                 Log.i(TAG, logMsg)
                 // 1. Parse the String into a URL:
                 val url = URL(to)
@@ -62,9 +64,6 @@ class ReportAdvPeriodState(val expected: Float, val to : String) : ConnStateDele
                     
                 })
                 thread.start()
-        }else{
-            Log.i(TAG, "correct adv period" + beacon.mac)
-        }
             beacon!!.disconnect()
         } else if (state == KBConnState.Connecting) {
             Log.i(TAG, "device start connecting")
