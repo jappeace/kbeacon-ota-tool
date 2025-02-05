@@ -19,6 +19,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "KBeaconPro"
+rootProject.name = "Converge-KKM-OTATool"
 include(":app")
  
