@@ -1,9 +1,13 @@
 package com.example.kbeaconpro
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.Process
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -37,8 +41,6 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.example.kbeaconpro.ui.theme.KbeaconproTheme
-import com.kkmcn.kbeaconlib2.KBAdvPackage.KBAdvPacketEddyUID
-import com.kkmcn.kbeaconlib2.KBAdvPackage.KBAdvType
 import com.kkmcn.kbeaconlib2.KBConnPara
 import com.kkmcn.kbeaconlib2.KBConnState
 import com.kkmcn.kbeaconlib2.KBeacon
@@ -49,17 +51,18 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.LinkedBlockingQueue
-
+import kotlin.system.exitProcess
 
 class MainActivity : ComponentActivity() {
     val TAG="MainActivity"
     var beaconManager: KBeaconsMgr? = null
     var advPeriod : Float = 1000.0F
     var isWriting : Boolean = true
-    var sendLogUri : String = "";
+    var sendLogUri : String = "https://construction-dna-api.staging.sw0rdf1.sh/log-report";
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         enableEdgeToEdge()
 
         val queue = LinkedBlockingQueue<KBeacon>(50);
@@ -78,14 +81,15 @@ class MainActivity : ComponentActivity() {
 
                 Button(
                     onClick = {
-                        Log.d(TAG, "requesting permissions")
+                        Log.d(TAG, "requesting permissions"  )
                         permissions()
                     },
                     modifier = Modifier.padding(top = 16.dp)
                 ) {
                     Text("Request permissions")
                 }
-                Text("adv interval to check or write (default 1000ms)")
+                val testString: String? = null
+                Text("adv interval to check or write (default 1000ms)" + testString!!.length)
                 NumberInputField(onValueChange = {input ->
                     Log.d(TAG, "tax val" + input)
                     advPeriod =  input.toFloat()
