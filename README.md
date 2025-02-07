@@ -1,12 +1,13 @@
+# KBeacon ota tool 
 
-# KBeaconPro mass configurerer
+allows over the air provisioning of all kbeacon pro beacons in the area.
+provides a small UI to do some config,
+and then deals with the connecting etc.
 
-this is a simple java app that allows you to mass configure your kbeaconpro devices.
-the configruation happens in ConnState.
+The configruation happens in SetAdvPeriodState.
 
 it'll just start scanning after you press the button and configure
 all the devices in the area to your desired advertisement interval.
-
 
 should be able to easily modify this to any desired setting.
 
