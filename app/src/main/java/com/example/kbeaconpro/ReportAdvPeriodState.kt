@@ -1,6 +1,9 @@
 package com.example.kbeaconpro
 
 import android.util.Log
+import com.kkmcn.kbeaconlib2.KBAdvPackage.KBAdvPacketEddyTLM
+import com.kkmcn.kbeaconlib2.KBAdvPackage.KBAdvPacketSystem
+import com.kkmcn.kbeaconlib2.KBAdvPackage.KBAdvType
 import com.kkmcn.kbeaconlib2.KBConnState
 import com.kkmcn.kbeaconlib2.KBConnectionEvent
 import com.kkmcn.kbeaconlib2.KBeacon
@@ -22,10 +25,17 @@ class ReportAdvPeriodState(val expected: Float, val to : String, val resultQueue
             }
             val period = oldCfgPara.advPeriod
                 val thread = Thread( {
+                    val battery = beacon.batteryPercent
+                    
                 var logMsg = "incorrect adv period " + beacon.mac + " is "+ period.toString() + " expected " + expected
-                if(period == expected){
-                  logMsg = "adv period " + beacon.mac + " is "+ period.toString() + " as expected"
+                if(period == expected) {
+                    logMsg =
+                        "adv period " + beacon.mac + " is " + period.toString() + " as expected"
                 }
+                if (battery < 98){
+                    logMsg = "battery warning! " + battery.toString() + " " + logMsg
+                }
+
                     resultQueue.put(logMsg)
                 Log.i(TAG, logMsg)
                 // 1. Parse the String into a URL:
