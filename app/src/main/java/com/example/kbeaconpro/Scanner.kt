@@ -1,54 +1,19 @@
 package com.example.kbeaconpro
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
-import android.os.Bundle
 import android.util.Log
-import android.widget.Toast
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
-import com.example.kbeaconpro.ui.theme.KbeaconproTheme
 import com.kkmcn.kbeaconlib2.KBAdvPackage.KBAdvPacketEBeacon
 import com.kkmcn.kbeaconlib2.KBAdvPackage.KBAdvPacketEddyTLM
 import com.kkmcn.kbeaconlib2.KBAdvPackage.KBAdvPacketEddyUID
 import com.kkmcn.kbeaconlib2.KBAdvPackage.KBAdvPacketEddyURL
-import com.kkmcn.kbeaconlib2.KBAdvPackage.KBAdvPacketIBeacon
-import com.kkmcn.kbeaconlib2.KBAdvPackage.KBAdvPacketSensor
 import com.kkmcn.kbeaconlib2.KBAdvPackage.KBAdvPacketSystem
 import com.kkmcn.kbeaconlib2.KBAdvPackage.KBAdvType
 import com.kkmcn.kbeaconlib2.KBeacon
-import com.kkmcn.kbeaconlib2.KBeaconsMgr
 import com.kkmcn.kbeaconlib2.KBeaconsMgr.KBeaconMgrDelegate
-
-import androidx.compose.foundation.layout.Column
-
-import androidx.compose.material3.Button
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.text.input.KeyboardType
 import java.util.concurrent.LinkedBlockingQueue
 
+
 class Scanner(val queue : LinkedBlockingQueue<KBeacon>)  : KBeaconMgrDelegate {
+    val rssiProximalLimit: Int = -50
     val TAG="Scanner"
             override fun onCentralBleStateChang(nNewState: Int) {}
             override fun onScanFailed(errorCode: Int) {}
@@ -87,8 +52,24 @@ class Scanner(val queue : LinkedBlockingQueue<KBeacon>)  : KBeaconMgrDelegate {
                                 Log.v(TAG, "UID Sid:" + advUID.sid)
 
                                 if(queue.remainingCapacity() > 1){
-                                    queue.put(beacon)
-                                    Log.v(TAG, "added");
+                                    var isInQueue = false
+                                    for(next in queue){
+                                        if(next.mac == beacon.mac){
+                                            isInQueue = true
+                                            break
+                                        }
+                                    }
+                                    if(beacon.rssi < rssiProximalLimit){
+                                        Log.i(TAG, "ignored " + beacon.mac + " because rssi is " + beacon.rssi.toString());
+
+                                        continue
+                                    }
+                                    if(!isInQueue){
+                                        Log.i(TAG, "added " + beacon.mac);
+                                        queue.put(beacon)
+                                    }else{
+                                        Log.i(TAG, "already in queue " + beacon.mac);
+                                    }
                                 }else{
                                     Log.v(TAG, "ignored queue full");
                                 }

@@ -55,7 +55,6 @@ class MainActivity : ComponentActivity() {
     val TAG="MainActivity"
     var beaconManager: KBeaconsMgr? = null
     var advPeriod : Float = 1000.0F
-    var rssiProximalLimit: Int = -50
     var isWriting : Boolean = true
     var sendLogUri : String = "";
 
@@ -107,7 +106,7 @@ class MainActivity : ComponentActivity() {
                             Log.v(TAG, "Running background task on IO dispatcher: ${Thread.currentThread().name}");
                             while(beaconManager!!.isScanning() || (! queue.isEmpty())){
                                 val beacon = queue.poll();
-                                if(beacon == null || beacon.rssi<rssiProximalLimit){
+                                if(beacon == null){
                                     delay(1)
                                     continue;
                                 }
