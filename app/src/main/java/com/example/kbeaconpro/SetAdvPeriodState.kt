@@ -5,22 +5,29 @@ import com.kkmcn.kbeaconlib2.KBConnState
 import com.kkmcn.kbeaconlib2.KBConnectionEvent
 import com.kkmcn.kbeaconlib2.KBeacon
 import com.kkmcn.kbeaconlib2.KBeacon.ConnStateDelegate
+import java.util.concurrent.LinkedBlockingQueue
 
 
-class SetAdvPeriodState(val advertisePeriod : Float) : ConnStateDelegate {
+class SetAdvPeriodState(val advertisePeriod : Float, val resultQueue: LinkedBlockingQueue<String>) : ConnStateDelegate {
     val TAG = "ConnState"
     override fun onConnStateChange(beacon: KBeacon?, state: KBConnState?, nReason: Int) {
         if (state == KBConnState.Connected) {
             Log.i(TAG, "device has connected")
             val oldCfgPara = beacon!!.getSlotCfg(0)
             oldCfgPara.setAdvPeriod(advertisePeriod)
+            val mac = beacon.mac
             beacon.modifyConfig(oldCfgPara) { bConfigSuccess, error ->
+                // TODO this doesn't appear to be ever executed??
+                var logMsg = "adv period " + mac + " set to "+ advertisePeriod.toString()
                 if (bConfigSuccess) {
-                    Log.i(TAG,"Enable encrypt advertisement success")
+                    Log.i(TAG,logMsg)
                 } else {
-                    Log.i(TAG,"Enable encrypt advertisement failed:" + error.errorCode)
+                    logMsg = "failed setting " + mac + " because " + error.errorCode
+                    Log.i(TAG,logMsg)
                 }
+                resultQueue.put(logMsg)
             }
+            resultQueue.put("adv period " + mac + " set to "+ advertisePeriod.toString())
             beacon!!.disconnect()
         } else if (state == KBConnState.Connecting) {
             Log.i(TAG, "device start connecting")

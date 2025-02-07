@@ -112,7 +112,7 @@ class MainActivity : ComponentActivity() {
                                     continue;
                                 }
                                 Log.v(TAG, "connecting to mac:" + beacon.mac)
-                                var  delegate :  ConnStateDelegate = SetAdvPeriodState(advPeriod)
+                                var  delegate :  ConnStateDelegate = SetAdvPeriodState(advPeriod, resultQueue)
                                 if(!isWriting) {
                                      delegate = ReportAdvPeriodState(advPeriod, sendLogUri, resultQueue)
                                 }
