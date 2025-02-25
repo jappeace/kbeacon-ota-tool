@@ -9,6 +9,7 @@ import com.kkmcn.kbeaconlib2.KBConnectionEvent
 import com.kkmcn.kbeaconlib2.KBeacon
 import com.kkmcn.kbeaconlib2.KBeacon.ConnStateDelegate
 import java.net.HttpURLConnection
+import java.net.MalformedURLException
 import java.net.URL
 import java.util.concurrent.LinkedBlockingQueue
 
@@ -26,54 +27,64 @@ class ReportAdvPeriodState(val expected: Float, val to : String, val resultQueue
             val period = oldCfgPara.advPeriod
                 val thread = Thread( {
                     val battery = beacon.batteryPercent
-                    
-                var logMsg = "incorrect adv period " + beacon.mac + " is "+ period.toString() + " expected " + expected
+                val name = beacon.name.substring(6)
+                var logMsg = beacon.mac + "incorrect adv period for " + name + " is "+ period.toString() + " expected " + expected
                 if(period == expected) {
                     logMsg =
-                        "adv period " + beacon.mac + " is " + period.toString() + " as expected"
+                        beacon.mac + " adv period for " + name + " is " + period.toString() + " as expected"
                 }
                 if (battery < 98){
-                    logMsg = "battery warning! " + battery.toString() + " " + logMsg
+                    logMsg = "battery warning! " + battery.toString() + " - " + logMsg
                 }
 
                     resultQueue.put(logMsg)
                 Log.i(TAG, logMsg)
-                // 1. Parse the String into a URL:
-                val url = URL(to)
+                // 1. Parse the String into a URL
 
-                // 2. Open a connection to the URL, cast it to HttpURLConnection
-                val connection = url.openConnection() as HttpURLConnection
-                Log.i(TAG, "connecting to $url")
-                try {
-                    // Configure the connection:
-                    connection.requestMethod = "POST"
-                    connection.doOutput = true
-                    connection.connectTimeout = 5000  // Optional: set connection timeout (ms)
-                    connection.readTimeout = 5000     // Optional: set read timeout (ms)
-                    connection.setRequestProperty("Content-Type", "text/plain;charset=utf-8")
-                    connection.setRequestProperty("Accept", "application/json")
-                    // 3. Write some text to the request body:
-                    val body = logMsg
-                    connection.outputStream.use { outputStream ->
-                        outputStream.write(body.toByteArray(Charsets.UTF_8))
+                    try {
+                        val url = URL(to)
+
+                        // 2. Open a connection to the URL, cast it to HttpURLConnection
+                        val connection = url.openConnection() as HttpURLConnection
+                        Log.i(TAG, "connecting to $url")
+                        try {
+                            // Configure the connection:
+                            connection.requestMethod = "POST"
+                            connection.doOutput = true
+                            connection.connectTimeout =
+                                5000  // Optional: set connection timeout (ms)
+                            connection.readTimeout = 5000     // Optional: set read timeout (ms)
+                            connection.setRequestProperty(
+                                "Content-Type",
+                                "text/plain;charset=utf-8"
+                            )
+                            connection.setRequestProperty("Accept", "application/json")
+                            // 3. Write some text to the request body:
+                            val body = logMsg
+                            connection.outputStream.use { outputStream ->
+                                outputStream.write(body.toByteArray(Charsets.UTF_8))
+                            }
+
+                            // Check the response code
+                            val responseCode = connection.responseCode
+                            Log.i(TAG, "Response Code: $responseCode")
+
+                            // 4. Read the response:
+                            val response =
+                                connection.inputStream.bufferedReader().use { it.readText() }
+                            Log.i(TAG, "Response Body: $response")
+
+                        } catch (e: Exception) {
+                            Log.e(TAG, "got some exception")
+                            Log.e(TAG, Log.getStackTraceString(e))
+                            e.message?.let { Log.e(TAG, it) }
+                        }finally {
+                            connection.disconnect()
+                        }
+
+                    }catch ( e : MalformedURLException){
+                        Log.i(TAG, "failed reporting " + e.toString())
                     }
-
-                    // Check the response code
-                    val responseCode = connection.responseCode
-                    Log.i(TAG, "Response Code: $responseCode")
-
-                    // 4. Read the response:
-                    val response = connection.inputStream.bufferedReader().use { it.readText() }
-                    Log.i(TAG, "Response Body: $response")
-
-                } catch (e: Exception) {
-                    Log.e(TAG, "got some exception")
-                    Log.e(TAG, Log.getStackTraceString(e))
-                    e.message?.let { Log.e(TAG, it) }
-                } finally {
-                    connection.disconnect()
-                }
-                    
                 })
                 thread.start()
             beacon!!.disconnect()

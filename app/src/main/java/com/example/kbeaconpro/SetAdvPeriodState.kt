@@ -16,18 +16,19 @@ class SetAdvPeriodState(val advertisePeriod : Float, val resultQueue: LinkedBloc
             val oldCfgPara = beacon!!.getSlotCfg(0)
             oldCfgPara.setAdvPeriod(advertisePeriod)
             val mac = beacon.mac
+            val name = beacon.name
             beacon.modifyConfig(oldCfgPara) { bConfigSuccess, error ->
                 // TODO this doesn't appear to be ever executed??
-                var logMsg = "adv period " + mac + " set to "+ advertisePeriod.toString()
+                var logMsg = "adv period " + name + " " + mac + " set to "+ advertisePeriod.toString()
                 if (bConfigSuccess) {
                     Log.i(TAG,logMsg)
                 } else {
-                    logMsg = "failed setting " + mac + " because " + error.errorCode
+                    logMsg = "failed setting " + name + " " + mac + " because " + error.errorCode
                     Log.i(TAG,logMsg)
                 }
                 resultQueue.put(logMsg)
             }
-            resultQueue.put("adv period " + mac + " set to "+ advertisePeriod.toString())
+            resultQueue.put("adv period " + name + " "  + mac + " set to "+ advertisePeriod.toString())
             beacon!!.disconnect()
         } else if (state == KBConnState.Connecting) {
             Log.i(TAG, "device start connecting")

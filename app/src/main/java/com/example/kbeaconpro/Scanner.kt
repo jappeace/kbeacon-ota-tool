@@ -19,16 +19,29 @@ class Scanner(val queue : LinkedBlockingQueue<KBeacon>)  : KBeaconMgrDelegate {
             override fun onScanFailed(errorCode: Int) {}
             //get advertisement packet during scanning callback
             override fun onBeaconDiscovered(beacons: Array<KBeacon>) {
+                Log.i(TAG, "discovered a beacon")
 
                 Log.v(TAG, "found beacon")
                 for (beacon in beacons) {
                     //get beacon adv common info
-                    Log.v(TAG, "beacon mac:" + beacon.mac)
+                    Log.i(TAG, "beacon mac:" + beacon.mac + " ")
                     Log.v(TAG, "beacon name:" + beacon.name)
                     Log.v(TAG, "beacon rssi:" + beacon.rssi)
+                    if(beacon.rssi < rssiProximalLimit){
+                        Log.i(TAG, "ignored " + beacon.mac + " because rssi is " + beacon.rssi.toString());
+
+                        continue
+                    }
+                    if(seen.contains(beacon.mac)){
+                        Log.i(TAG, "already seen " + beacon.mac);
+                        continue;
+                    }else{
+                        seen.add(beacon.mac);
+                    }
 
                     //get adv packet
                     for (advPacket in beacon.allAdvPackets()) {
+                        Log.i(TAG,"found a packet " + advPacket.toString())
                         when (advPacket.advType) {
                             KBAdvType.IBeacon -> {
                                 Log.v(TAG, "ibeacon, unlikely branch");
@@ -48,28 +61,16 @@ class Scanner(val queue : LinkedBlockingQueue<KBeacon>)  : KBeaconMgrDelegate {
 
                             KBAdvType.EddyUID -> {
                                 val advUID = advPacket as KBAdvPacketEddyUID
-                                Log.v(TAG, "UID Nid:" + advUID.nid)
-                                Log.v(TAG, "UID Sid:" + advUID.sid)
+                                Log.i(TAG, "UID Nid:" + advUID.nid)
+                                Log.i(TAG, "UID Sid:" + advUID.sid)
+
 
                                 if(queue.remainingCapacity() > 1){
-                                    var isInQueue = false
-                                    for(next in queue){
-                                        if(next.mac == beacon.mac){
-                                            isInQueue = true
-                                            break
-                                        }
-                                    }
-                                    if(beacon.rssi < rssiProximalLimit){
-                                        Log.i(TAG, "ignored " + beacon.mac + " because rssi is " + beacon.rssi.toString());
 
-                                        continue
-                                    }
-                                    if(!isInQueue){
+
                                         Log.i(TAG, "added " + beacon.mac);
                                         queue.put(beacon)
-                                    }else{
-                                        Log.i(TAG, "already in queue " + beacon.mac);
-                                    }
+
                                 }else{
                                     Log.v(TAG, "ignored queue full");
                                 }
