@@ -8,7 +8,7 @@ import com.kkmcn.kbeaconlib2.KBeacon.ConnStateDelegate
 import java.util.concurrent.LinkedBlockingQueue
 
 
-class SetAdvPeriodState(val advertisePeriod : Float, val resultQueue: LinkedBlockingQueue<String>) : ConnStateDelegate {
+class SetAdvPeriodState(val advertisePeriod : Float, val resultQueue: LinkedBlockingQueue<BeaconResult>) : ConnStateDelegate {
     val TAG = "ConnState"
     override fun onConnStateChange(beacon: KBeacon?, state: KBConnState?, nReason: Int) {
         if (state == KBConnState.Connected) {
@@ -26,9 +26,8 @@ class SetAdvPeriodState(val advertisePeriod : Float, val resultQueue: LinkedBloc
                     logMsg = "failed setting " + name + " " + mac + " because " + error.errorCode
                     Log.i(TAG,logMsg)
                 }
-                resultQueue.put(logMsg)
             }
-            resultQueue.put("adv period " + name + " "  + mac + " set to "+ advertisePeriod.toString())
+            resultQueue.put(BeaconResult(name, mac, advertisePeriod, beacon.batteryPercent))
             beacon!!.disconnect()
         } else if (state == KBConnState.Connecting) {
             Log.i(TAG, "device start connecting")

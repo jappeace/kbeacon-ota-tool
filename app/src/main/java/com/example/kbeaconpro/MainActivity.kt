@@ -12,6 +12,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -31,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
@@ -63,7 +65,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val queue = LinkedBlockingQueue<KBeacon>(50);
-        val resultQueue = LinkedBlockingQueue<String>(10);
+        val resultQueue = LinkedBlockingQueue<BeaconResult>(10);
+        val doneReport = LinkedBlockingQueue<BeaconResult>(10);
 
         setContent {
             KbeaconproTheme {
@@ -85,7 +88,6 @@ class MainActivity : ComponentActivity() {
                 ) {
                     Text("Request permissions")
                 }
-                Text("adv interval to check or write (default 1000ms)")
                 NumberInputField(onValueChange = {input ->
                     Log.d(TAG, "tax val" + input)
                     advPeriod =  input.toFloat()
@@ -127,10 +129,7 @@ class MainActivity : ComponentActivity() {
                                         connPara,
                                         delegate
                                     );
-                                    while (beacon.state != KBConnState.Disconnected) {
-                                        delay(50);
-                                        Log.v(TAG, "awaiting disconnect" + beacon.mac)
-                                    }
+
 
 
                             }
@@ -141,7 +140,7 @@ class MainActivity : ComponentActivity() {
                     Text("start scanning")
                 }
 
-                ShowMacResults(resultQueue)
+                ShowMacResults(resultQueue, doneReport, advPeriod)
             }
                 }
             }
@@ -152,7 +151,7 @@ class MainActivity : ComponentActivity() {
             toastShow( "Make sure the phone supports BLE function");
             return;
         }
-        beaconManager!!.delegate = Scanner(queue);
+        beaconManager!!.delegate = Scanner(queue, doneReport);
 
     }
 fun toastShow(message: String){
@@ -189,7 +188,7 @@ fun permissions(){
 fun NumberInputField(
     onValueChange: (String) -> Unit
 ) {
-    var numberText by remember { mutableStateOf("") }
+    var numberText by remember { mutableStateOf("1000") }
 
     OutlinedTextField(
         value = numberText,
@@ -200,7 +199,7 @@ fun NumberInputField(
                 onValueChange(input)  // Notify external listener
             }
         },
-        label = { Text("Enter number") },
+        label = { Text("adv interval to check or write ") },
         keyboardOptions = KeyboardOptions.Default.copy(
             keyboardType = KeyboardType.Number
         )
@@ -209,9 +208,12 @@ fun NumberInputField(
 
 @Composable
 fun ShowMacResults(
-    resultQueue:  LinkedBlockingQueue<String>
+    resultQueue:  LinkedBlockingQueue<BeaconResult>,
+    doneReport: LinkedBlockingQueue<BeaconResult>,
+    expectedAdvPeriod : Float,
 ){
-    val resultState = remember { mutableStateListOf<String>() }
+    val resultState = remember { mutableStateListOf<BeaconResult>() }
+    val expectedAdd = remember { mutableStateOf(expectedAdvPeriod) }
     LaunchedEffect(Unit) {
         while (true) {
             
@@ -219,6 +221,7 @@ fun ShowMacResults(
             if (result !in resultState) {
                 resultState.add(result)
             }
+            doneReport.put(result)
         }
     }
     Scaffold { _ ->
@@ -228,10 +231,27 @@ fun ShowMacResults(
             contentPadding = PaddingValues(16.dp)
         ) {
             items(resultState) { message ->
+                var battColor = Color.Black;
+                if (message.batteryPercent < 95){
+                    battColor = Color.Red;
+                }
+                var advColor = Color.Black
+                if (message.advPeriod != expectedAdd.value){
+                    advColor = Color.Red
+                }
+                Row(horizontalArrangement = Arrangement.SpaceBetween){
                 Text(
-                    text = message,
-                    modifier = Modifier.padding(vertical = 4.dp)
+                    text = message.name,
+                    modifier = Modifier.padding( horizontal = 5.dp)
                 )
+                    Text(
+                        text = "adv: " + message.advPeriod.toString()
+                    )
+                    Text(
+                        text = "batt: " + message.batteryPercent.toString(),
+                        color =  battColor
+                    )
+                }
             }
         }
     }
@@ -250,14 +270,14 @@ fun SwitchMinimal(    onValueChange: (Boolean) -> Unit, onUriChange: (String) ->
         }
     )
     if(! checked){
-        Text("send check results url")
+
         OutlinedTextField(
             value = uriText,
             onValueChange = { input ->
                 uriText = input  // Update internal state
                 onUriChange(input);
             },
-            label = { Text("Enter url") },
+            label = { Text("Check results url")},
             keyboardOptions = KeyboardOptions.Default.copy(
                 keyboardType = KeyboardType.Uri
             )

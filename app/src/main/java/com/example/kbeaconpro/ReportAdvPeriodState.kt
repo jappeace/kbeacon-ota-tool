@@ -1,9 +1,6 @@
 package com.example.kbeaconpro
 
 import android.util.Log
-import com.kkmcn.kbeaconlib2.KBAdvPackage.KBAdvPacketEddyTLM
-import com.kkmcn.kbeaconlib2.KBAdvPackage.KBAdvPacketSystem
-import com.kkmcn.kbeaconlib2.KBAdvPackage.KBAdvType
 import com.kkmcn.kbeaconlib2.KBConnState
 import com.kkmcn.kbeaconlib2.KBConnectionEvent
 import com.kkmcn.kbeaconlib2.KBeacon
@@ -14,9 +11,10 @@ import java.net.URL
 import java.util.concurrent.LinkedBlockingQueue
 
 
-class ReportAdvPeriodState(val expected: Float, val to : String, val resultQueue: LinkedBlockingQueue<String>) : ConnStateDelegate {
+class ReportAdvPeriodState(val expected: Float, val to : String, val resultQueue: LinkedBlockingQueue<BeaconResult>) : ConnStateDelegate {
     val TAG = "ConnState"
     override fun onConnStateChange(beacon: KBeacon?, state: KBConnState?, nReason: Int) {
+
         if (state == KBConnState.Connected) {
             Log.i(TAG, "device has connected")
             val oldCfgPara = beacon!!.getSlotCfg(0)
@@ -37,10 +35,10 @@ class ReportAdvPeriodState(val expected: Float, val to : String, val resultQueue
                     logMsg = "battery warning! " + battery.toString() + " - " + logMsg
                 }
 
-                    resultQueue.put(logMsg)
+                    resultQueue.put(BeaconResult(name, beacon.mac, period, battery))
                 Log.i(TAG, logMsg)
                 // 1. Parse the String into a URL
-
+                    if(!to.isEmpty()){
                     try {
                         val url = URL(to)
 
@@ -84,7 +82,7 @@ class ReportAdvPeriodState(val expected: Float, val to : String, val resultQueue
 
                     }catch ( e : MalformedURLException){
                         Log.i(TAG, "failed reporting " + e.toString())
-                    }
+                    }}
                 })
                 thread.start()
             beacon!!.disconnect()

@@ -12,13 +12,18 @@ import com.kkmcn.kbeaconlib2.KBeaconsMgr.KBeaconMgrDelegate
 import java.util.concurrent.LinkedBlockingQueue
 
 
-class Scanner(val queue : LinkedBlockingQueue<KBeacon>)  : KBeaconMgrDelegate {
+class Scanner(val queue : LinkedBlockingQueue<KBeacon>, val doneReport : LinkedBlockingQueue<BeaconResult>)  : KBeaconMgrDelegate {
     val rssiProximalLimit: Int = -50
     val TAG="Scanner"
+    val seen : HashSet<String> = HashSet()
             override fun onCentralBleStateChang(nNewState: Int) {}
             override fun onScanFailed(errorCode: Int) {}
             //get advertisement packet during scanning callback
             override fun onBeaconDiscovered(beacons: Array<KBeacon>) {
+                while(!doneReport.isEmpty()){
+                    val result = doneReport.take()
+                    seen.add(result.mac)
+                }
                 Log.i(TAG, "discovered a beacon")
 
                 Log.v(TAG, "found beacon")
@@ -32,11 +37,10 @@ class Scanner(val queue : LinkedBlockingQueue<KBeacon>)  : KBeaconMgrDelegate {
 
                         continue
                     }
+
                     if(seen.contains(beacon.mac)){
                         Log.i(TAG, "already seen " + beacon.mac);
                         continue;
-                    }else{
-                        seen.add(beacon.mac);
                     }
 
                     //get adv packet
@@ -67,9 +71,24 @@ class Scanner(val queue : LinkedBlockingQueue<KBeacon>)  : KBeaconMgrDelegate {
 
                                 if(queue.remainingCapacity() > 1){
 
+                                    var isInQueue = false
+                                    for(next in queue){
+                                        if(next.mac == beacon.mac){
+                                            isInQueue = true
+                                            break
+                                        }
+                                    }
+                                    if(beacon.rssi < rssiProximalLimit){
+                                        Log.i(TAG, "ignored " + beacon.mac + " because rssi is " + beacon.rssi.toString());
 
+                                        continue
+                                    }
+                                    if(!isInQueue){
                                         Log.i(TAG, "added " + beacon.mac);
                                         queue.put(beacon)
+                                    }else{
+                                        Log.i(TAG, "already in queue " + beacon.mac);
+                                    }
 
                                 }else{
                                     Log.v(TAG, "ignored queue full");
