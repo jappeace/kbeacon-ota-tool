@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
@@ -51,12 +52,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.LinkedBlockingQueue
-
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 
 class MainActivity : ComponentActivity() {
     val TAG="MainActivity"
     var beaconManager: KBeaconsMgr? = null
-    var advPeriod : Float = 1000.0F
+    var advPeriod : Float by mutableStateOf(1000.0F)
     var isWriting : Boolean = true
     var sendLogUri : String = "";
 
@@ -67,7 +70,7 @@ class MainActivity : ComponentActivity() {
         val queue = LinkedBlockingQueue<KBeacon>(50);
         val resultQueue = LinkedBlockingQueue<BeaconResult>(10);
         val doneReport = LinkedBlockingQueue<BeaconResult>(10);
-
+        val me = this;
         setContent {
             KbeaconproTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
@@ -78,19 +81,28 @@ class MainActivity : ComponentActivity() {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-
-                Button(
-                    onClick = {
-                        Log.d(TAG, "requesting permissions")
-                        permissions()
-                    },
-                    modifier = Modifier.padding(top = 16.dp)
-                ) {
-                    Text("Request permissions")
+                Row() {
+                    Button(
+                        onClick = {
+                            Log.d(TAG, "requesting permissions")
+                            permissions()
+                        },
+                        modifier = Modifier.padding(top = 16.dp)
+                    ) {
+                        Text("Request permissions")
+                    }
+                    Button(
+                        onClick = {
+                            me.recreate()
+                        }
+                    ){
+                        Text("reset")
+                    }
                 }
                 NumberInputField(onValueChange = {input ->
                     Log.d(TAG, "tax val" + input)
-                    advPeriod =  input.toFloat()
+                    advPeriod =  input.toFloat() 
+
                 })
                 Text("enable writing")
                 SwitchMinimal(onValueChange = { input -> isWriting = input }, onUriChange = { input -> sendLogUri = input })
@@ -213,7 +225,6 @@ fun ShowMacResults(
     expectedAdvPeriod : Float,
 ){
     val resultState = remember { mutableStateListOf<BeaconResult>() }
-    val expectedAdd = remember { mutableStateOf(expectedAdvPeriod) }
     LaunchedEffect(Unit) {
         while (true) {
             
@@ -230,22 +241,29 @@ fun ShowMacResults(
                 .fillMaxSize(),
             contentPadding = PaddingValues(16.dp)
         ) {
-            items(resultState) { message ->
+            itemsIndexed(resultState) { index, message ->
                 var battColor = Color.Black;
+                var labelColor = Color.Black;
                 if (message.batteryPercent < 95){
                     battColor = Color.Red;
+                    labelColor = Color.Red;
                 }
                 var advColor = Color.Black
-                if (message.advPeriod != expectedAdd.value){
+                if (message.advPeriod != expectedAdvPeriod){
                     advColor = Color.Red
+                    labelColor = Color.Red;
                 }
-                Row(horizontalArrangement = Arrangement.SpaceBetween){
-                Text(
-                    text = message.name,
-                    modifier = Modifier.padding( horizontal = 5.dp)
+                Row(
+                    modifier = Modifier.fillParentMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ){
+                    Text(
+                    text = (index + 1).toString() + " " + message.name,
+                    color = labelColor
                 )
                     Text(
-                        text = "adv: " + message.advPeriod.toString()
+                        text = "adv: " + message.advPeriod.toString(),
+                        color = advColor
                     )
                     Text(
                         text = "batt: " + message.batteryPercent.toString(),
