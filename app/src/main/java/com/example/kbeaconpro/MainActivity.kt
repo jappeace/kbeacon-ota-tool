@@ -241,7 +241,7 @@ fun ShowMacResults(
                 .fillMaxSize(),
             contentPadding = PaddingValues(16.dp)
         ) {
-            itemsIndexed(resultState) { index, message ->
+            itemsIndexed(resultState.reversed()) { index, message ->
                 var battColor = Color.Black;
                 var labelColor = Color.Black;
                 if (message.batteryPercent < 95){
