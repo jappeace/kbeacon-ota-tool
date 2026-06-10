@@ -1,28 +1,37 @@
-# KBeacon ota tool 
+# KBeacon OTA tool
 
-allows over the air provisioning of all kbeacon pro beacons in the area.
-provides a small UI to do some config,
-and then deals with the connecting etc.
+Allows over the air provisioning of all KBeacon Pro beacons in the area.
+Provides a small UI to set a target advertisement interval, then scans and
+configures all nearby devices.
 
-The configruation happens in SetAdvPeriodState.
+Written in Haskell using the [hatter](https://github.com/jappeace/hatter)
+mobile framework (like Flutter but Haskell). Compiles to a native Android APK.
 
-it'll just start scanning after you press the button and configure
-all the devices in the area to your desired advertisement interval.
+## Status
 
-should be able to easily modify this to any desired setting.
-
+BLE **scanning** and UI are implemented. Beacon **configuration** (GATT
+connect + write) is pending hatter issue
+[#108](https://github.com/jappeace/hatter/issues/108).
+See [TODO.md](TODO.md) for the full list of deferred items.
 
 ## Usage
 
-1. make a build with android studio
-2. launch it.
-3. press grant permissions, accept, press it again untill it stops asking for them.
-4. set your desired adv interval
-4. press start scanning.
-
+1. Pin hatter with npins:
+   ```
+   npins init
+   npins add github jappeace hatter
+   ```
+2. Build the APK:
+   ```
+   nix-build nix/apk.nix
+   ```
+3. Install `result/kbeacon-ota.apk` on your Android device.
+4. Press **Request Permissions** and accept BLE permissions.
+5. Set your desired advertisement interval (ms).
+6. Press **Start Scan** — nearby KBeacon Pro devices appear filtered to
+   RSSI ≥ -50 dBm.
 
 ## Resources
-most code is copied from:
-https://github.com/kkmhogen/KBeaconProDemo_Android
 
-(it was a bit haphazzard, this provides a full build).
+Original Kotlin implementation reference:
+https://github.com/kkmhogen/KBeaconProDemo_Android
