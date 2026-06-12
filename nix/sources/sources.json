@@ -1,0 +1,37 @@
+{
+  "pins": {
+    "hatter": {
+      "type": "Git",
+      "repository": {
+        "type": "GitHub",
+        "owner": "jappeace",
+        "repo": "hatter"
+      },
+      "branch": "master",
+      "submodules": false,
+      "revision": "eb743b94c657a1cb464efe86207d279af7366839",
+      "url": "https://github.com/jappeace/hatter/archive/eb743b94c657a1cb464efe86207d279af7366839.tar.gz",
+      "hash": "sha256-uYXIQ22FSB5DZlI+F5NtsTCD6FZW28pwd6jON7MkFwQ="
+    },
+    "mobile-core-tools": {
+      "type": "Git",
+      "repository": {
+        "type": "GitHub",
+        "owner": "zw3rk",
+        "repo": "mobile-core-tools"
+      },
+      "branch": "master",
+      "submodules": false,
+      "revision": "90e0a52893288bfe85e5ed6bff9cee077e3d18c7",
+      "url": "https://github.com/zw3rk/mobile-core-tools/archive/90e0a52893288bfe85e5ed6bff9cee077e3d18c7.tar.gz",
+      "hash": "sha256-/1Eppd4g/30hU/LKG84VWOgjOfrWfesBqM7eNmnOf08="
+    },
+    "nixpkgs": {
+      "type": "Channel",
+      "name": "nixpkgs-unstable",
+      "url": "https://releases.nixos.org/nixpkgs/nixpkgs-26.05pre975217.5e11f7acce6c/nixexprs.tar.xz",
+      "hash": "sha256-avkT2TR2Wh/TQTysYGFOkGiF5+2R2nS7TZOfQ4omieQ="
+    }
+  },
+  "version": 7
+}
