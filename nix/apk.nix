@@ -13,7 +13,11 @@ hatterLib.mkApk {
     { lib = sharedAarch64; abiDir = "arm64-v8a"; }
     { lib = sharedArmv7a;  abiDir = "armeabi-v7a"; }
   ];
-  androidSrc = "${sources.hatter}/android";
-  apkName    = "kbeacon-ota.apk";
-  name       = "kbeacon-ota-apk";
+  # Our own manifest/MainActivity in package me.jappie.otatool. HatterActivity
+  # (the JNI base class) is pulled in from hatter via baseJavaSrc; it must keep
+  # its own me.jappie.hatter package so libhatter.so's native symbols resolve.
+  androidSrc  = ../android;
+  baseJavaSrc = "${sources.hatter}/android/java";
+  apkName     = "kbeacon-ota.apk";
+  name        = "kbeacon-ota-apk";
 }
