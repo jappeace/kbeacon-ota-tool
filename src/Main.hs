@@ -21,6 +21,7 @@ import Hatter
   )
 import Hatter.AppContext (AppContext(..), derefAppContext)
 import Hatter.Ble (BleState, BleScanResult(..), checkBleAdapter, startBleScan, stopBleScan)
+import Hatter.Permission (PermissionState, Permission(..), requestPermission)
 import Hatter.Widget
   ( ButtonConfig(..)
   , InputType(..)
@@ -53,15 +54,23 @@ main = do
   advPeriodRef <- newIORef ("1000" :: Text)
   isScanningRef <- newIORef False
   bleStateRef  <- newIORef (Nothing :: Maybe BleState)
+  permissionStateRef <- newIORef (Nothing :: Maybe PermissionState)
   redrawRef    <- newIORef (pure () :: IO ())
 
   (onRequestPerms, onCheckAdapter, onStartScan, onStopScan, onPeriodChange) <-
     runActionM actionState $ do
 
       perms <- createAction $ do
-        -- TODO: call Hatter.Permission once BLE permission API is available
-        -- See: https://github.com/jappeace/hatter (check for Permission module)
-        platformLog "permission request not yet wired (no BLE-specific permission hook)"
+        mPermissionState <- readIORef permissionStateRef
+        case mPermissionState of
+          Nothing -> platformLog "permission state not ready"
+          -- BLE scanning needs BLUETOOTH_SCAN on API 31+ and ACCESS_FINE_LOCATION
+          -- on older devices; request both, location after bluetooth resolves.
+          Just permissionState ->
+            requestPermission permissionState PermissionBluetooth $ \bluetoothStatus -> do
+              platformLog ("BLUETOOTH_SCAN permission: " <> pack (show bluetoothStatus))
+              requestPermission permissionState PermissionLocation $ \locationStatus ->
+                platformLog ("ACCESS_FINE_LOCATION permission: " <> pack (show locationStatus))
 
       checkAdapter <- createAction $ do
         status <- checkBleAdapter
@@ -121,6 +130,7 @@ main = do
 
   appCtx <- derefAppContext ctxPtr
   writeIORef bleStateRef (Just (acBleState appCtx))
+  writeIORef permissionStateRef (Just (acPermissionState appCtx))
   pure ctxPtr
 
 appView
