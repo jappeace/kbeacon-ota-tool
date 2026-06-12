@@ -8,6 +8,7 @@ import Data.Text (Text, pack)
 import Foreign.Ptr (Ptr)
 import Hatter
   ( MobileApp(..)
+  , UserState(..)
   , Action
   , OnChange
   , startMobileApp
@@ -19,7 +20,7 @@ import Hatter
   , createOnChange
   )
 import Hatter.AppContext (AppContext(..), derefAppContext)
-import Hatter.Ble (BleState, checkBleAdapter, startBleScan, stopBleScan)
+import Hatter.Ble (BleState, BleScanResult(..), checkBleAdapter, startBleScan, stopBleScan)
 import Hatter.Widget
   ( ButtonConfig(..)
   , InputType(..)
@@ -127,10 +128,10 @@ appView
   -> Text
   -> Bool
   -> Action -> Action -> Action -> Action -> OnChange
-  -> IO Widget
+  -> Widget
 appView beacons advPeriod isScanning
         onRequestPerms onCheckAdapter onStartScan onStopScan onPeriodChange =
-  pure $ column
+  column
     [ row
         [ button "Request Permissions" onRequestPerms
         , button "Check Adapter"       onCheckAdapter
