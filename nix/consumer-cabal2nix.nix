@@ -11,12 +11,13 @@
 mkDerivation {
   pname = "kbeacon-ota";
   version = "0.2.0.0";
-  # unwitch is deliberately absent even though the library uses it:
-  # hatter's cross-deps.nix and ios-deps.nix always add unwitch to the
-  # collected package DB (hatterOwnDeps), and listing it here as well
-  # makes collect-deps copy the same .conf twice, which fails on the
-  # read-only first copy. The cabal file still declares it for the
-  # native build.
+  # Decision: unwitch is deliberately absent even though the library
+  # uses it. hatter's cross-deps.nix and ios-deps.nix always add
+  # unwitch to the collected package DB (hatterOwnDeps), and listing
+  # it here as well makes collect-deps copy the same .conf twice,
+  # which fails on the read-only first copy. The alternative, fixing
+  # collect-deps to deduplicate, lives in hatter, not here. The cabal
+  # file still declares unwitch for the native build.
   libraryHaskellDepends = [
     base bytestring containers cryptohash-md5 text time
   ];
