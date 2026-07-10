@@ -199,7 +199,7 @@ fi
 assert_ui_text "Scanning: yes | 1 device(s) found" "UI shows one discovered device"
 
 BEACON_RSSI=$(grep -o "found beacon KBPro-F4F5F6 [^ ]* rssi=[-0-9]*" "$LOGCAT_SCAN" \
-    | head -1 | grep -o 'rssi=[-0-9]*' | cut -d= -f2)
+    | head -1 | grep -o 'rssi=[-0-9]*' | cut -d= -f2 || true)
 echo "Simulated KBeacon RSSI: ${BEACON_RSSI:-unknown}"
 tap_button "Stop Scan" || echo "WARNING: could not tap Stop Scan"
 sleep 1
