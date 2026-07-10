@@ -39,7 +39,9 @@ module KBeacon.Protocol
     -- * Frame codec
   , FrameBudget(..)
   , defaultFrameBudget
-  , frameBudgetFromAuthMtu
+  , frameBudgetFromAttMtu
+  , minFrameBudget
+  , negotiatedFrameBudget
   , encodeJsonRequestFrames
   , BeaconNotification(..)
   , AuthEvent(..)
@@ -78,6 +80,7 @@ import Data.Text.Encoding qualified as TextEncoding
 import Data.Word (Word8)
 import KBeacon.Json
   ( JsonValue(..)
+  , hexDigitValue
   , jsonArrayItems
   , jsonInt
   , jsonNumberFromInt
@@ -144,15 +147,8 @@ macFromAddress address =
 parseHexByte :: Text -> Maybe Word8
 parseHexByte part =
   if Text.length part == 2 && Text.all isHexDigit part
-    then Int.toWord8 (Text.foldl' (\total c -> total * 16 + hexValue c) 0 part)
+    then Int.toWord8 (Text.foldl' (\total c -> total * 16 + hexDigitValue c) 0 part)
     else Nothing
-
--- | Numeric value of a hex digit (input verified by 'isHexDigit').
-hexValue :: Char -> Int
-hexValue c = if
-  | c >= '0' && c <= '9' -> fromEnum c - fromEnum '0'
-  | c >= 'a' && c <= 'f' -> fromEnum c - fromEnum 'a' + 10
-  | otherwise            -> fromEnum c - fromEnum 'A' + 10
 
 -- | Recover a KBeacon's MAC from its advertised name. Factory-named
 -- devices advertise "KBPro-" (or another prefix) followed by the six
@@ -261,16 +257,37 @@ newtype FrameBudget = FrameBudget { unFrameBudget :: Int }
 defaultFrameBudget :: FrameBudget
 defaultFrameBudget = FrameBudget 17
 
--- | The auth success frame carries the beacon's ATT MTU as one raw
--- byte; usable JSON payload per frame is that MTU minus 3 (ATT
--- header) minus 3 (frame header). Nonsensical values fall back to
--- the default.
-frameBudgetFromAuthMtu :: Int -> FrameBudget
-frameBudgetFromAuthMtu reportedMtu =
-  let usable = reportedMtu - 6
+-- | JSON payload budget for a given ATT MTU: the MTU minus 3 (ATT
+-- header) minus 3 (frame header). Used both for the MTU the local
+-- stack granted and for the one the beacon reports in its auth
+-- success frame; nonsensical values fall back to the default.
+frameBudgetFromAttMtu :: Int -> FrameBudget
+frameBudgetFromAttMtu attMtu =
+  let usable = attMtu - 6
   in if usable > unFrameBudget defaultFrameBudget
     then FrameBudget usable
     else defaultFrameBudget
+
+-- | The smaller of two budgets: the link and the beacon each bound
+-- the frame size, so writes must satisfy both.
+minFrameBudget :: FrameBudget -> FrameBudget -> FrameBudget
+minFrameBudget (FrameBudget first) (FrameBudget second) =
+  FrameBudget (min first second)
+
+-- | Frame budget honouring BOTH sides of the link: the ATT MTU the
+-- local stack actually granted (Nothing when negotiation failed) and
+-- the MTU the beacon reports in its auth success frame (0 when the
+-- frame carried none). When the local negotiation failed the link is
+-- still at ATT 23, so the beacon's usually larger report must not
+-- win.
+negotiatedFrameBudget :: Maybe Int -> Int -> FrameBudget
+negotiatedFrameBudget localMtu beaconReportedMtu =
+  let beaconBudget = if beaconReportedMtu > 0
+        then frameBudgetFromAttMtu beaconReportedMtu
+        else defaultFrameBudget
+  in case localMtu of
+    Nothing -> defaultFrameBudget
+    Just granted -> minFrameBudget (frameBudgetFromAttMtu granted) beaconBudget
 
 -- | Split a JSON message into write-ready frames. Each frame is
 -- @header : seqHigh : seqLow : payload@ where the sequence is the

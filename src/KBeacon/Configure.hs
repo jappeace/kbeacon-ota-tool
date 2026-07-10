@@ -19,6 +19,15 @@
 -- connect attempts and GATT operations fail through their callbacks,
 -- and an unresponsive-but-connected beacon eventually drops the link,
 -- which we treat as failure and move on.
+--
+-- Decision: every callback registered for a beacon captures that
+-- beacon's serial number and is ignored when the serial no longer
+-- matches the active beacon. The platform can deliver late events
+-- (a trailing connection-closed after a failed connect, a GATT
+-- completion racing a link drop); without the serial check those
+-- would be misattributed to the next beacon in the queue. The
+-- alternative, deregistering callbacks, is not available: hatter only
+-- replaces callbacks on the next registration.
 module KBeacon.Configure
   ( BeaconTarget(..)
   , BeaconOutcome(..)
@@ -41,7 +50,7 @@ import Hatter.Ble
   , BleGattError(..)
   , BleMtu(..)
   , BleServiceUuid(..)
-  , BleState
+  , BleState(..)
   , BleWriteMode(..)
   , connectBleDevice
   , disconnectBleDevice
@@ -77,11 +86,11 @@ import KBeacon.Protocol
   , emptyReportAssembly
   , encodeJsonRequestFrames
   , expectedDeviceProof
-  , frameBudgetFromAuthMtu
   , getParaRequestJson
   , kbConfigServiceUuidText
   , kbNotifyCharacteristicUuidText
   , kbWriteCharacteristicUuidText
+  , negotiatedFrameBudget
   , parseBeaconNotification
   , parseParaResponse
   , paraBatteryPercent
@@ -139,19 +148,27 @@ data SessionPhase
   | PhaseDisconnecting
   deriving (Show, Eq)
 
+-- | Identifies which beacon attempt a callback was registered for.
+newtype BeaconSerial = BeaconSerial Int
+  deriving (Show, Eq)
+
 -- | Everything mutable about the session.
 data SessionState = SessionState
   { sessionQueue :: [BeaconTarget]
   , sessionActive :: Maybe ActiveBeacon
+  , sessionNextSerial :: Int
   }
 
 -- | State for the beacon currently being configured.
 data ActiveBeacon = ActiveBeacon
   { activeTarget :: BeaconTarget
+  , activeSerial :: BeaconSerial
   , activeMac :: BeaconMac
   , activePhase :: SessionPhase
   , activeAppRandom :: AppRandom
   , activeAuthVariant :: AuthVariant
+  , activeLocalMtu :: Maybe Int
+    -- ^ ATT MTU the local stack granted, when negotiation succeeded.
   , activeBudget :: FrameBudget
   , activePendingFrames :: [ByteString]
     -- ^ Fragments still to send when the beacon acks "expect next".
@@ -190,7 +207,11 @@ startConfigureSession
   -> IO ()
   -> IO ()
 startConfigureSession bleState period password targets logLine onOutcome onFinished = do
-  stateRef <- newIORef SessionState { sessionQueue = targets, sessionActive = Nothing }
+  stateRef <- newIORef SessionState
+    { sessionQueue = targets
+    , sessionActive = Nothing
+    , sessionNextSerial = 0
+    }
   let context = SessionContext
         { contextBleState = bleState
         , contextPeriod = period
@@ -208,8 +229,8 @@ advanceQueue context = do
   state <- readIORef (contextState context)
   case sessionQueue state of
     [] -> do
-      writeIORef (contextState context)
-        SessionState { sessionQueue = [], sessionActive = Nothing }
+      writeIORef (contextState context) state
+        { sessionQueue = [], sessionActive = Nothing }
       contextOnFinished context
     (target : remaining) ->
       case targetMac target of
@@ -223,14 +244,18 @@ advanceQueue context = do
           advanceQueue context
         Just mac -> do
           appRandom <- freshAppRandom
+          let serial = BeaconSerial (sessionNextSerial state)
           writeIORef (contextState context) SessionState
             { sessionQueue = remaining
+            , sessionNextSerial = sessionNextSerial state + 1
             , sessionActive = Just ActiveBeacon
                 { activeTarget = target
+                , activeSerial = serial
                 , activeMac = mac
                 , activePhase = PhaseConnecting
                 , activeAppRandom = appRandom
                 , activeAuthVariant = AuthFullDigest
+                , activeLocalMtu = Nothing
                 , activeBudget = defaultFrameBudget
                 , activePendingFrames = []
                 , activeWriteQueue = []
@@ -244,7 +269,7 @@ advanceQueue context = do
             ("configuring " <> targetName target <> " ("
               <> unBleDeviceAddress (targetAddress target) <> ")")
           connectBleDevice (contextBleState context) (targetAddress target)
-            (onConnectionEvent context)
+            (onConnectionEvent context serial)
 
 -- | Four challenge bytes derived from the wall clock (see
 -- 'appRandomFromPicoseconds' for why that is enough randomness).
@@ -259,15 +284,20 @@ currentUtcSeconds = do
   now <- getPOSIXTime
   pure (truncate now)
 
--- | Run an update against the active beacon; events arriving with no
--- active beacon (late platform events after a failure) are logged and
--- dropped.
-withActiveBeacon :: SessionContext -> Text -> (ActiveBeacon -> IO ()) -> IO ()
-withActiveBeacon context eventLabel handler = do
+-- | Run an update against the active beacon, but only when the event
+-- belongs to it: late platform events from a previous beacon (or
+-- events after a failure cleared the slot) are logged and dropped.
+withActiveBeacon :: SessionContext -> BeaconSerial -> Text -> (ActiveBeacon -> IO ()) -> IO ()
+withActiveBeacon context serial eventLabel handler = do
   state <- readIORef (contextState context)
   case sessionActive state of
-    Just active -> handler active
-    Nothing -> contextLog context ("ignoring late " <> eventLabel <> " event: no active beacon")
+    Just active ->
+      if activeSerial active == serial
+        then handler active
+        else contextLog context
+          ("ignoring " <> eventLabel <> " event from a previous beacon attempt")
+    Nothing -> contextLog context
+      ("ignoring late " <> eventLabel <> " event: no active beacon")
 
 -- | Store a modified active beacon.
 storeActiveBeacon :: SessionContext -> ActiveBeacon -> IO ()
@@ -298,17 +328,18 @@ finishActiveBeacon context active result = do
   advanceQueue context
 
 -- | Connection events for the beacon we asked hatter to connect to.
-onConnectionEvent :: SessionContext -> BleConnectionEvent -> IO ()
-onConnectionEvent context event =
-  withActiveBeacon context "connection" $ \active ->
+onConnectionEvent :: SessionContext -> BeaconSerial -> BleConnectionEvent -> IO ()
+onConnectionEvent context serial event =
+  withActiveBeacon context serial "connection" $ \active ->
     case event of
       BleConnectionEstablished ->
         if activePhase active == PhaseConnecting
           then do
             storeActiveBeacon context active { activePhase = PhaseRequestingMtu }
-            -- 251 is what KKM's library requests; the beacon's real
-            -- limit arrives with the auth result.
-            requestBleMtu (contextBleState context) (BleMtu 251) (onMtuResult context)
+            -- 251 is what KKM's library requests; the granted value
+            -- caps the frame budget together with the beacon's limit.
+            requestBleMtu (contextBleState context) (BleMtu 251)
+              (onMtuResult context serial)
           else contextLog context "ignoring duplicate connection-established event"
       BleConnectionClosed -> onConnectionEnded context active "connection closed"
       BleConnectionFailed -> onConnectionEnded context active "connection failed"
@@ -317,7 +348,8 @@ onConnectionEvent context event =
 -- are disconnecting (outcome already decided), a failure anywhere
 -- else.
 onConnectionEnded :: SessionContext -> ActiveBeacon -> Text -> IO ()
-onConnectionEnded context active reason =
+onConnectionEnded context active reason = do
+  clearOrphanedGattOperation context
   case activePhase active of
     PhaseDisconnecting ->
       case activeFailure active of
@@ -338,28 +370,54 @@ onConnectionEnded context active reason =
     PhaseCollectingParaReports -> finishActiveBeacon context active (Left reason)
     PhaseAwaitingCfgAck -> finishActiveBeacon context active (Left reason)
 
+-- | Clear hatter's single pending-GATT-operation slot when the link
+-- ends. The platform never completes an operation that was in flight
+-- when the connection dropped, so without this the stale entry makes
+-- every operation on the NEXT connection fail with BleGattBusy.
+--
+-- Decision: the slot is cleared without invoking the orphaned
+-- operation's callback. The callback belongs to the beacon that is
+-- being finished right now; delivering a late failure into it after
+-- the queue advances would be misrouted (and our write-completion
+-- handler would misread it as the next beacon's write failing).
+clearOrphanedGattOperation :: SessionContext -> IO ()
+clearOrphanedGattOperation context = do
+  let pendingRef = blesGattPending (contextBleState context)
+  pending <- readIORef pendingRef
+  case pending of
+    Nothing -> pure ()
+    Just _ -> do
+      contextLog context "clearing the GATT operation orphaned by the ended connection"
+      writeIORef pendingRef Nothing
+
 -- | MTU negotiation result. A failure is not fatal: the default
 -- 23-byte budget still works, the frames just get smaller.
-onMtuResult :: SessionContext -> Either BleGattError BleMtu -> IO ()
-onMtuResult context result =
-  withActiveBeacon context "mtu" $ \active -> do
-    case result of
-      Left gattError ->
+onMtuResult :: SessionContext -> BeaconSerial -> Either BleGattError BleMtu -> IO ()
+onMtuResult context serial result =
+  withActiveBeacon context serial "mtu" $ \active -> do
+    grantedMtu <- case result of
+      Left gattError -> do
         contextLog context ("MTU request failed, continuing with default: "
           <> Text.pack (show gattError))
-      Right granted ->
+        pure Nothing
+      Right granted -> do
         contextLog context ("MTU granted: " <> Text.pack (show (unBleMtu granted)))
-    storeActiveBeacon context active { activePhase = PhaseDiscovering }
-    discoverBleServices (contextBleState context) (onDiscoveryResult context)
+        pure (Just (unBleMtu granted))
+    storeActiveBeacon context active
+      { activePhase = PhaseDiscovering
+      , activeLocalMtu = grantedMtu
+      }
+    discoverBleServices (contextBleState context) (onDiscoveryResult context serial)
 
 -- | Service discovery result: the beacon must expose the KBeacon
 -- config service with its write and notify characteristics.
 onDiscoveryResult
   :: SessionContext
+  -> BeaconSerial
   -> Either BleGattError [BleDiscoveredCharacteristic]
   -> IO ()
-onDiscoveryResult context result =
-  withActiveBeacon context "discovery" $ \active ->
+onDiscoveryResult context serial result =
+  withActiveBeacon context serial "discovery" $ \active ->
     case result of
       Left gattError ->
         failActiveBeacon context active
@@ -370,29 +428,32 @@ onDiscoveryResult context result =
             storeActiveBeacon context active { activePhase = PhaseSubscribing }
             subscribeBleCharacteristic (contextBleState context)
               kbConfigService kbNotifyCharacteristic
-              (onBeaconNotification context)
-              (onSubscribed context)
+              (onBeaconNotification context serial)
+              (onSubscribed context serial)
           else failActiveBeacon context active
             "device does not expose the KBeacon config service (FEA0 with FEA1/FEA2)"
 
--- | Check for FEA1 and FEA2 under FEA0, comparing case-normalized
--- UUIDs (Android reports lowercase, iOS uppercase).
+-- | Whether a discovered characteristic sits in the KBeacon config
+-- service, comparing case-normalized UUIDs (Android reports
+-- lowercase, iOS uppercase).
+inKBeaconConfigService :: BleDiscoveredCharacteristic -> Bool
+inKBeaconConfigService entry =
+  normalizeBleServiceUuid (bdcService entry)
+    == normalizeBleServiceUuid kbConfigService
+
+-- | Check for FEA1 and FEA2 under FEA0.
 hasKBeaconConfigCharacteristics :: [BleDiscoveredCharacteristic] -> Bool
 hasKBeaconConfigCharacteristics discovered =
-  let inConfigService entry =
-        normalizeBleServiceUuid (bdcService entry)
-          == normalizeBleServiceUuid kbConfigService
-      configEntries = filter inConfigService discovered
-      characteristicNames = map (unBleCharacteristicUuid . bdcCharacteristic) configEntries
-      lowered = map Text.toLower characteristicNames
+  let configEntries = filter inKBeaconConfigService discovered
+      lowered = map (Text.toLower . unBleCharacteristicUuid . bdcCharacteristic) configEntries
       writePresent = elem (Text.toLower kbWriteCharacteristicUuidText) lowered
       notifyPresent = elem (Text.toLower kbNotifyCharacteristicUuidText) lowered
   in writePresent && notifyPresent
 
 -- | Subscription confirmed: send auth phase 1.
-onSubscribed :: SessionContext -> Either BleGattError () -> IO ()
-onSubscribed context result =
-  withActiveBeacon context "subscribe" $ \active ->
+onSubscribed :: SessionContext -> BeaconSerial -> Either BleGattError () -> IO ()
+onSubscribed context serial result =
+  withActiveBeacon context serial "subscribe" $ \active ->
     case result of
       Left gattError ->
         failActiveBeacon context active
@@ -400,35 +461,35 @@ onSubscribed context result =
       Right () -> do
         utcSeconds <- currentUtcSeconds
         storeActiveBeacon context active { activePhase = PhaseAwaitingChallenge }
-        enqueueFrame context (authPhase1Request (activeAppRandom active) utcSeconds)
+        enqueueFrame context serial (authPhase1Request (activeAppRandom active) utcSeconds)
 
 -- | Queue a frame for the FEA1 write characteristic. Hatter permits
 -- one outstanding GATT operation, so writes issue strictly one at a
 -- time; anything arriving while a write is in flight waits in the
 -- queue.
-enqueueFrame :: SessionContext -> ByteString -> IO ()
-enqueueFrame context frame =
-  withActiveBeacon context "write" $ \active ->
+enqueueFrame :: SessionContext -> BeaconSerial -> ByteString -> IO ()
+enqueueFrame context serial frame =
+  withActiveBeacon context serial "write" $ \active ->
     if activeWriteInFlight active
       then storeActiveBeacon context active
         { activeWriteQueue = activeWriteQueue active ++ [frame] }
       else do
         storeActiveBeacon context active { activeWriteInFlight = True }
-        writeFrame context frame
+        writeFrame context serial frame
 
 -- | Issue one write to FEA1 (without response, like KKM's libraries).
-writeFrame :: SessionContext -> ByteString -> IO ()
-writeFrame context frame =
+writeFrame :: SessionContext -> BeaconSerial -> ByteString -> IO ()
+writeFrame context serial frame =
   writeBleCharacteristic (contextBleState context)
     kbConfigService kbWriteCharacteristic
     BleWriteWithoutResponse (BleCharacteristicValue frame)
-    (onFrameWritten context)
+    (onFrameWritten context serial)
 
 -- | Write completion: send the next queued frame, if any. A write
 -- error is fatal for the active beacon.
-onFrameWritten :: SessionContext -> Either BleGattError () -> IO ()
-onFrameWritten context result =
-  withActiveBeacon context "write-completion" $ \active ->
+onFrameWritten :: SessionContext -> BeaconSerial -> Either BleGattError () -> IO ()
+onFrameWritten context serial result =
+  withActiveBeacon context serial "write-completion" $ \active ->
     case result of
       Left gattError ->
         failActiveBeacon context active
@@ -438,13 +499,13 @@ onFrameWritten context result =
           [] -> storeActiveBeacon context active { activeWriteInFlight = False }
           (next : remaining) -> do
             storeActiveBeacon context active { activeWriteQueue = remaining }
-            writeFrame context next
+            writeFrame context serial next
 
 -- | Every FEA2 notification lands here and is routed by its decoded
 -- type and the current phase.
-onBeaconNotification :: SessionContext -> BleCharacteristicValue -> IO ()
-onBeaconNotification context (BleCharacteristicValue frame) =
-  withActiveBeacon context "notification" $ \active ->
+onBeaconNotification :: SessionContext -> BeaconSerial -> BleCharacteristicValue -> IO ()
+onBeaconNotification context serial (BleCharacteristicValue frame) =
+  withActiveBeacon context serial "notification" $ \active ->
     case parseBeaconNotification frame of
       Left parseError ->
         failActiveBeacon context active ("unparseable notification: " <> parseError)
@@ -475,20 +536,21 @@ handleAuthEvent context active = \case
               { activePhase = PhaseAwaitingAuthResult
               , activeAuthVariant = variant
               }
-            enqueueFrame context (authPhase2Request (activeMac active)
-              deviceRandom (contextPassword context) variant)
-  AuthSucceeded reportedMtu -> do
-    contextLog context (targetName (activeTarget active)
-      <> " authenticated (reported MTU " <> Text.pack (show reportedMtu) <> ")")
-    let budget = if reportedMtu > 0
-          then frameBudgetFromAuthMtu reportedMtu
-          else defaultFrameBudget
-    sendJsonRequest context active
-      { activePhase = PhaseAwaitingParaResponse
-      , activeBudget = budget
-      , activeAssembly = emptyReportAssembly
-      }
-      getParaRequestJson
+            enqueueFrame context (activeSerial active)
+              (authPhase2Request (activeMac active)
+                deviceRandom (contextPassword context) variant)
+  AuthSucceeded reportedMtu ->
+    if activePhase active /= PhaseAwaitingAuthResult
+      then contextLog context "ignoring auth success outside the auth phase"
+      else do
+        contextLog context (targetName (activeTarget active)
+          <> " authenticated (reported MTU " <> Text.pack (show reportedMtu) <> ")")
+        sendJsonRequest context active
+          { activePhase = PhaseAwaitingParaResponse
+          , activeBudget = negotiatedFrameBudget (activeLocalMtu active) reportedMtu
+          , activeAssembly = emptyReportAssembly
+          }
+          getParaRequestJson
   AuthRejected ->
     failActiveBeacon context active "beacon rejected authentication (wrong password)"
 
@@ -500,7 +562,7 @@ sendJsonRequest context active message =
     [] -> failActiveBeacon context active "frame encoder produced no frames"
     (firstFrame : laterFrames) -> do
       storeActiveBeacon context active { activePendingFrames = laterFrames }
-      enqueueFrame context firstFrame
+      enqueueFrame context (activeSerial active) firstFrame
 
 -- | Ack handling for the JSON channel.
 handleJsonAck :: SessionContext -> ActiveBeacon -> JsonAck -> IO ()
@@ -511,7 +573,7 @@ handleJsonAck context active ack = if
           "beacon asked for a next fragment but none is pending"
         (next : remaining) -> do
           storeActiveBeacon context active { activePendingFrames = remaining }
-          enqueueFrame context next
+          enqueueFrame context (activeSerial active) next
   | jsonAckCause ack == ackCauseCommandReceived ->
       if activePhase active == PhaseAwaitingParaResponse
         then storeActiveBeacon context active
@@ -564,10 +626,11 @@ handleReportFragment context active fragment =
       Left assemblyError -> failActiveBeacon context active assemblyError
       Right (grown, complete) -> do
         let received = BS.length (unReportAssembly grown)
+            serial = activeSerial active
         storeActiveBeacon context active { activeAssembly = grown }
-        enqueueFrame context (reportAckFrame received)
+        enqueueFrame context serial (reportAckFrame received)
         if complete
-          then withActiveBeacon context "report-completion" $ \fresh ->
+          then withActiveBeacon context serial "report-completion" $ \fresh ->
             handleParaResponse context fresh (unReportAssembly grown)
           else pure ()
 

@@ -28,6 +28,7 @@ module KBeacon.Json
   , jsonNumberFromInt
   , jsonText
   , jsonArrayItems
+  , hexDigitValue
   ) where
 
 import Data.Char (chr, isDigit, isHexDigit, ord)
@@ -225,7 +226,10 @@ parseHex4 input =
     then Right (Text.foldl' (\total c -> total * 16 + hexDigitValue c) 0 digits, rest)
     else Left ("invalid \\u escape: " <> digits)
 
--- | Value of a single hex digit character.
+-- | Value of a single hex digit character. Callers guard with
+-- 'isHexDigit', so the zero fallback is unreachable; it exists only
+-- to keep the function total. Shared with "KBeacon.Protocol"'s MAC
+-- parsing.
 hexDigitValue :: Char -> Int
 hexDigitValue c = if
   | c >= '0' && c <= '9' -> ord c - ord '0'

@@ -18,6 +18,7 @@ module Main where
 import Data.ByteString qualified as ByteString
 import Data.Char (intToDigit, toUpper)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef, modifyIORef')
+import Data.Maybe (isJust, isNothing)
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text, pack)
@@ -272,16 +273,11 @@ onScanResult appState threshold result = do
     else do
       seen <- readIORef (stateSeenAddresses appState)
       if Set.member address seen
-        then platformLog ("already seen " <> address)
+        then upgradeDiscoveredBeacon appState result
         else do
           modifyIORef' (stateSeenAddresses appState) (Set.insert address)
-          let target = BeaconTarget
-                { targetName = bsrDeviceName result
-                , targetAddress = bsrDeviceAddress result
-                , targetMac = macForAuthentication address (bsrDeviceName result)
-                }
           modifyIORef' (stateBeacons appState) (\beacons -> DiscoveredBeacon
-            { beaconTarget = target
+            { beaconTarget = scanResultTarget result
             , beaconRssi = rssi
             , beaconStatus = StatusDiscovered
             , beaconReportNote = Nothing
@@ -289,6 +285,43 @@ onScanResult appState threshold result = do
           platformLog ("found beacon " <> bsrDeviceName result
             <> " " <> address <> " rssi=" <> pack (show rssi))
           requestRepaint appState
+
+-- | Build the configure target for one scan result.
+scanResultTarget :: BleScanResult -> BeaconTarget
+scanResultTarget result = BeaconTarget
+  { targetName = bsrDeviceName result
+  , targetAddress = bsrDeviceAddress result
+  , targetMac = macForAuthentication
+      (unBleDeviceAddress (bsrDeviceAddress result))
+      (bsrDeviceName result)
+  }
+
+-- | A repeated scan result for a known address can carry information
+-- the first one lacked: on iOS the device name (which the auth MAC is
+-- derived from) travels in the scan response and is often missing
+-- from the first callback. Replace the stored entry when the new
+-- result supplies the MAC the stored one is missing.
+upgradeDiscoveredBeacon :: AppState -> BleScanResult -> IO ()
+upgradeDiscoveredBeacon appState result = do
+  let address = unBleDeviceAddress (bsrDeviceAddress result)
+      upgraded = scanResultTarget result
+  beacons <- readIORef (stateBeacons appState)
+  let entryNeedsUpgrade beacon =
+        unBleDeviceAddress (targetAddress (beaconTarget beacon)) == address
+          && isNothing (targetMac (beaconTarget beacon))
+          && isJust (targetMac upgraded)
+  if any entryNeedsUpgrade beacons
+    then do
+      modifyIORef' (stateBeacons appState) (map (\beacon ->
+        if entryNeedsUpgrade beacon
+          then beacon
+            { beaconTarget = upgraded
+            , beaconRssi = bsrRssi result
+            }
+          else beacon))
+      platformLog ("upgraded " <> address <> " with name " <> bsrDeviceName result)
+      requestRepaint appState
+    else platformLog ("already seen " <> address)
 
 -- | Stop scanning.
 stopScanAction :: AppState -> IO ()
@@ -318,8 +351,7 @@ configureAllAction appState = do
         stopBleScan bleState
         writeIORef (stateScanning appState) False
         writeIORef (stateConfiguring appState) True
-        let markConfiguring beacon = beacon { beaconStatus = StatusConfiguring }
-        writeIORef (stateBeacons appState) (map markConfiguring discovered)
+        writeIORef (stateBeacons appState) (map markBeaconConfiguring discovered)
         setStatus appState
           ("configuring " <> pack (show (length discovered)) <> " beacon(s) to "
             <> pack (show (unAdvPeriodMs period)) <> " ms")
@@ -328,6 +360,10 @@ configureAllAction appState = do
           platformLog
           (onBeaconOutcome appState)
           (onConfigureFinished appState)
+
+-- | Reset a row to the configuring state at session start.
+markBeaconConfiguring :: DiscoveredBeacon -> DiscoveredBeacon
+markBeaconConfiguring beacon = beacon { beaconStatus = StatusConfiguring }
 
 -- | Parse and validate the advertisement period input.
 parseAdvPeriod :: Text -> Either Text AdvPeriodMs

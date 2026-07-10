@@ -36,11 +36,12 @@ import KBeacon.Protocol
   , emptyReportAssembly
   , encodeJsonRequestFrames
   , expectedDeviceProof
-  , frameBudgetFromAuthMtu
+  , frameBudgetFromAttMtu
   , getParaRequestJson
   , macFromAddress
   , macFromName
   , macForAuthentication
+  , negotiatedFrameBudget
   , parseBeaconNotification
   , parseParaResponse
   , reportAckFrame
@@ -204,9 +205,17 @@ framingTests = testGroup "frame encoding"
       assertEqual "payload" (BS.replicate 40 0x61)
         (BS.concat (map (BS.drop 3) (encodeJsonRequestFrames (FrameBudget 17) (BS.replicate 40 0x61))))
   , testCase "auth MTU byte grows the budget" $
-      assertEqual "budget" (FrameBudget 241) (frameBudgetFromAuthMtu 247)
+      assertEqual "budget" (FrameBudget 241) (frameBudgetFromAttMtu 247)
   , testCase "nonsense MTU keeps the default" $
-      assertEqual "budget" (FrameBudget 17) (frameBudgetFromAuthMtu 3)
+      assertEqual "budget" (FrameBudget 17) (frameBudgetFromAttMtu 3)
+  , testCase "negotiated budget is capped by the locally granted MTU" $
+      assertEqual "budget" (FrameBudget 125) (negotiatedFrameBudget (Just 131) 247)
+  , testCase "negotiated budget is capped by the beacon's report" $
+      assertEqual "budget" (FrameBudget 241) (negotiatedFrameBudget (Just 512) 247)
+  , testCase "failed local MTU negotiation keeps the default budget" $
+      assertEqual "budget" (FrameBudget 17) (negotiatedFrameBudget Nothing 247)
+  , testCase "absent beacon MTU report uses the default beacon bound" $
+      assertEqual "budget" (FrameBudget 17) (negotiatedFrameBudget (Just 247) 0)
   , testCase "report ack frame layout" $
       assertEqual "frame"
         (BS.pack [0x33, 0x01, 0x02, 0x03, 0xE8, 0x00, 0x00])

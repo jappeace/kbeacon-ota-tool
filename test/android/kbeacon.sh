@@ -23,7 +23,7 @@
 #   BUMBLE_PYTHON (python with bumble), REPORT_PYTHON (plain python3),
 #   REPORT_PORT
 set -euo pipefail
-# shellcheck source=/dev/null
+# shellcheck source=helpers.sh
 source "$HATTER_TEST_SCRIPTS/android/helpers.sh"
 
 EXIT_CODE=0
@@ -161,14 +161,19 @@ fi
 ensure_guest_bluetooth_on || exit 1
 
 # --- Phase 1: install, render, adapter ------------------------------------
-start_app "$KBEACON_APK" "kbeacon"
-
+# Grant the runtime permissions between install and launch (not via
+# start_app, which launches immediately): MainActivity.onCreate fires
+# requestPermissions right away, and pre-granting keeps the dialog
+# from ever appearing, on every retry attempt.
+install_apk "$KBEACON_APK" || { echo "FAIL: install_apk"; exit 1; }
 for permission in android.permission.BLUETOOTH_SCAN \
                   android.permission.BLUETOOTH_CONNECT \
                   android.permission.ACCESS_FINE_LOCATION; do
     "$ADB" -s "$EMULATOR_SERIAL" shell pm grant "$PACKAGE" "$permission" 2>/dev/null \
         || echo "WARNING: could not grant $permission"
 done
+"$ADB" -s "$EMULATOR_SERIAL" logcat -c
+"$ADB" -s "$EMULATOR_SERIAL" shell am start -n "$PACKAGE/$ACTIVITY"
 
 wait_for_render "kbeacon"
 wait_for_logcat "kbeacon-ota starting" 30 || true
@@ -241,6 +246,9 @@ tap_button "Start Scan" || echo "WARNING: could not tap Start Scan"
 wait_for_logcat "found beacon KBPro-F4F5F6" 90 || true
 tap_button "Configure All" || echo "WARNING: could not tap Configure All"
 wait_for_logcat "configuration finished" 120 || true
+# The HTTP report completes asynchronously after the session finishes;
+# wait for its log line separately so the assert below cannot race it.
+wait_for_logcat "report sent (HTTP" 30 || true
 
 LOGCAT_CONFIGURE="$WORK_DIR/kbeacon_configure.txt"
 "$ADB" -s "$EMULATOR_SERIAL" logcat -d '*:I' > "$LOGCAT_CONFIGURE" 2>&1 || true
