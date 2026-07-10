@@ -134,7 +134,19 @@ data BeaconSuccess = BeaconSuccess
   , successBatteryPercent :: Maybe Int
   } deriving (Show, Eq)
 
--- | Where the active beacon is in the protocol.
+-- | Where the active beacon is in the protocol. The happy path runs
+-- top to bottom:
+--
+-- @
+-- Connecting -> RequestingMtu -> Discovering -> Subscribing
+--   -> AwaitingChallenge -> AwaitingAuthResult
+--   -> AwaitingParaResponse [-> CollectingParaReports]
+--   -> AwaitingCfgAck -> Disconnecting -> (next beacon)
+-- @
+--
+-- CollectingParaReports only happens when the beacon sends its config
+-- as fragmented report frames instead of piggybacked on the ack. Any
+-- failure jumps straight to Disconnecting with 'activeFailure' set.
 data SessionPhase
   = PhaseConnecting
   | PhaseRequestingMtu
