@@ -256,7 +256,11 @@ renderJson = \case
 renderMember :: (Text, JsonValue) -> Text
 renderMember (key, value) = renderString key <> ":" <> renderJson value
 
--- | Render a number, preferring the integer form.
+-- | Render a number, preferring the integer form. Integrality is
+-- detected by round-tripping (round, convert back, compare): exact
+-- integers survive unchanged, anything with a fraction does not. The
+-- 1.0e15 cap keeps the integer rendering well inside Double's 2^53
+-- exact range.
 renderNumber :: Double -> Text
 renderNumber number =
   let rounded = round number :: Integer

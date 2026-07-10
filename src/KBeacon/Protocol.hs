@@ -138,7 +138,9 @@ macFromAddress address =
     then fmap (BeaconMac . BS.pack) (traverse parseHexByte parts)
     else Nothing
 
--- | Parse one two-digit hex byte.
+-- | Parse one two-digit hex byte. The narrowing always succeeds
+-- (two hex digits sum to at most 255); routing it through the same
+-- Maybe keeps the function total without an impossible error branch.
 parseHexByte :: Text -> Maybe Word8
 parseHexByte part =
   if Text.length part == 2 && Text.all isHexDigit part

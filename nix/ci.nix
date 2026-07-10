@@ -46,10 +46,13 @@ let
   '';
 
   # Byte-compile the python test helpers so syntax errors fail CI even
-  # though the scripts only run inside the emulator job.
+  # though the scripts only run inside the emulator job. The pycache
+  # prefix keeps py_compile from writing __pycache__ into the
+  # read-only store source.
   pythonCheckTarget = pkgs.runCommand "ci-python-check" {
     nativeBuildInputs = [ pkgs.python3 ];
   } ''
+    export PYTHONPYCACHEPREFIX="$TMPDIR/pycache"
     python3 -m py_compile \
       ${testScripts}/android/kbeacon_peripheral.py \
       ${testScripts}/android/report_server.py
