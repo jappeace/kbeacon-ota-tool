@@ -1,73 +1,41 @@
-# TODO — items not yet ported from kbeacon-ota-tool
+# TODO / known limitations
 
-## 1. Beacon configuration (GATT connect + write)
+Everything the original Kotlin tool did is ported: beacon
+configuration over GATT, HTTP result reporting, battery percent and
+the KKM service-UUID scan filter all landed with the hatter GATT API
+(hatter #108). What remains:
 
-**Original**: `SetAdvPeriodState.kt` — connects to each beacon with
-`beacon.connectEnhanced("0000000000000000", 5000, connPara, delegate)`,
-then calls `beacon.modifyConfig(slotCfg)` to write the advertisement period.
+## 1. Renamed beacons on iOS
 
-**Blocked on**: hatter has no BLE connect / GATT API yet.
+KBeacon auth is keyed on the device MAC, which iOS never exposes.
+Factory-named beacons work (the MAC is reconstructed from KKM's OUI
+plus the "KBPro-XXXXXX" name suffix); renamed ones need the MAC from
+the advertisement's system packet or 0x2080 service data, which
+hatter's `BleScanResult` does not carry. Needs a hatter scan-result
+extension exposing raw advertisement payloads (follow-up to
+https://github.com/jappeace/hatter/issues/108).
 
-**Hatter issue**: https://github.com/jappeace/hatter/issues/108
-"BLE: connection, GATT, and scan filtering"
+## 2. Advertisement-level battery percent
 
-When #108 lands, implement this as a new action that:
-1. Connects to the beacon by `bsrDeviceAddress`
-2. Discovers the KBeacon slot config characteristic
-3. Writes the target advertisement period
-4. Disconnects and records the result in the beacon list
+Battery is currently read over GATT (`"btPt"` in the config JSON),
+which requires connecting. KBeacons also broadcast it in byte 0 of the
+0x2080 service data, which would show battery for beacons that are
+merely scanned; blocked on the same raw-advertisement hatter extension
+as item 1.
 
----
+## 3. Non-default passwords
 
-## 2. HTTP result reporting
+The tool authenticates with KKM's factory password (sixteen zeros),
+like the original Kotlin implementation. Beacons with a changed
+password need a password input field wired through to
+`KBeacon.Configure` (the protocol layer already takes the password as
+a parameter).
 
-**Original**: `ReportAdvPeriodState.kt` — POSTs each `BeaconResult` (name,
-mac, advPeriod, batteryPercent) to a user-supplied URL as JSON.
+## 4. Stall watchdog
 
-**Available in hatter**: `Hatter.Http.performRequest` already exists.
-
-**What's needed**: wire up the URL TextInput + a "Report" mode switch, then
-call `performRequest` after each beacon's configuration result is known.
-Depends on item 1 (configuration) to have actual results worth reporting.
-
----
-
-## 3. Battery percentage per beacon
-
-**Original**: `BeaconResult.batteryPercent` — read from the KBeacon GATT
-connection after `connectEnhanced`.
-
-**Blocked on**: (a) BLE GATT connect (item 1 above), and (b) hatter's
-`BleScanResult` doesn't expose battery level even from advertisement packets.
-
-**Hatter issue**: https://github.com/jappeace/hatter/issues/78
-"Platform integration: Battery status" (device battery — may not cover
-peripheral BLE battery; the advertisement-level battery field is part of
-https://github.com/jappeace/hatter/issues/108 scan-result extensions)
-
----
-
-## 4. Scan result filtering by service UUID
-
-**Original**: `Scanner.kt` only queues beacons that advertise `KBAdvType.EddyUID`
-— i.e., it filters to KBeacon-specific beacons at the advertisement type level.
-
-**Blocked on**: hatter #108 also covers scan filtering by service UUID.
-
-When available, add a UUID filter to `startBleScan` so the scan returns only
-KBeacon Pro devices instead of all nearby BLE peripherals.
-
----
-
-## 5. npins setup
-
-`nix/sources/` is currently a placeholder. Before running `nix-build`, pin
-hatter with npins:
-
-```
-cd kbeacon-ota-hatter
-npins init
-npins add github jappeace hatter
-```
-
-This creates `nix/sources/` with the pinned hatter revision.
+Hatter apps run on the non-threaded GHC RTS, so the configure state
+machine cannot arm Haskell-side timeouts (see the Decision comment in
+`src/KBeacon/Configure.hs`). Failures surface through platform
+callbacks and link drops, which covers real beacons; a
+connected-but-mute peripheral would stall the session until it
+disconnects. Needs a platform timer API in hatter.

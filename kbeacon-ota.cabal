@@ -1,6 +1,6 @@
 cabal-version: 3.0
 name:          kbeacon-ota
-version:       0.1.0.0
+version:       0.2.0.0
 author:        Jappie Klooster
 maintainer:    jappie.klooster@converge.io
 license:       MIT
@@ -10,16 +10,51 @@ common common-options
   default-extensions:
       OverloadedStrings
       ImportQualifiedPost
+      LambdaCase
+      MultiWayIf
   ghc-options:
       -O2 -Wall -Wincomplete-uni-patterns -Wincomplete-record-updates
+      -Widentities -Wredundant-constraints -Wpartial-fields
   default-language: Haskell2010
+
+library
+  import:        common-options
+  exposed-modules:
+      KBeacon.Configure
+      KBeacon.Json
+      KBeacon.Protocol
+  hs-source-dirs: src
+  build-depends:
+      base       >= 4.9 && < 5
+    , bytestring < 1
+    , cryptohash-md5 < 1
+    , hatter
+    , text       < 3
+    , time
+    , unwitch    >= 3.0.0 && < 4
 
 executable kbeacon-ota
   import:        common-options
   main-is:       Main.hs
-  hs-source-dirs: src
+  hs-source-dirs: app
+  ghc-options:   -threaded
   build-depends:
-      base     >= 4.9 && < 5
-    , hatter
-    , text     < 3
+      base       >= 4.9 && < 5
+    , bytestring < 1
     , containers < 1
+    , hatter
+    , kbeacon-ota
+    , text       < 3
+    , unwitch    >= 3.0.0 && < 4
+
+test-suite unit
+  import:        common-options
+  type:          exitcode-stdio-1.0
+  main-is:       Test.hs
+  hs-source-dirs: test
+  build-depends:
+      base       >= 4.9 && < 5
+    , bytestring < 1
+    , kbeacon-ota
+    , tasty      < 2
+    , tasty-hunit < 1
