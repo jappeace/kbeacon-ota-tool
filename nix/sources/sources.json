@@ -4,14 +4,14 @@
       "type": "Git",
       "repository": {
         "type": "GitHub",
-        "owner": "jappeace-sloth",
+        "owner": "jappeace",
         "repo": "hatter"
       },
-      "branch": "ble-name-from-scan-record",
+      "branch": "master",
       "submodules": false,
-      "revision": "af9bfabfb9ed7c83f1858b5cd2eefdac6190964e",
-      "url": "https://github.com/jappeace-sloth/hatter/archive/af9bfabfb9ed7c83f1858b5cd2eefdac6190964e.tar.gz",
-      "hash": "sha256-AoJe4wrPb36eB1hXsTJY4TWmnp8/BtuvqV0c6RHyUZ4="
+      "revision": "f8ad26a3fd45b00622d2800e37a60932efd6283a",
+      "url": "https://github.com/jappeace/hatter/archive/f8ad26a3fd45b00622d2800e37a60932efd6283a.tar.gz",
+      "hash": "sha256-0tKVOQYghS/stgv8U/Xz+bX+dIAjv0Z8bhH+LiMswEQ="
     },
     "mobile-core-tools": {
       "type": "Git",

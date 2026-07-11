@@ -2,3 +2,5 @@ dist-newstyle/
 .ghc.environment.*
 result
 result-*
+cabal.project.local
+__pycache__/
