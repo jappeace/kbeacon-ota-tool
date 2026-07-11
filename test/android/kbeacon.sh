@@ -3,17 +3,18 @@
 #
 # Drives the real APK on an emulator with netsim virtual Bluetooth and
 # a simulated KBeacon fleet (kbeacon_peripheral.py), covering the UI
-# under various bluetooth signals:
+# under various bluetooth signals. Ordered to use only two scans (see
+# the scan-rate note further down):
 #
 #   Phase 1  render + adapter: app renders, adapter reports on.
-#   Phase 2  strong signal: threshold -100, the simulated KBeacon is
-#            listed; the decoy advertising a non-KKM UUID is not
-#            (service-UUID scan filter).
-#   Phase 3  weak signal: threshold above the beacon's real RSSI, the
-#            same advertisement is now ignored and the list stays
+#   Phase 2  weak signal: threshold 20 dBm (above any real RSSI), the
+#            beacon's advertisement is ignored and the list stays
 #            empty (RSSI proximity filter).
-#   Phase 4  configure + report: full MD5 auth + getPara + cfg write
-#            over GATT sets a new advertisement period on the
+#   Phase 3  strong signal + configure + report: threshold -100, the
+#            simulated KBeacon is listed while the decoy advertising a
+#            non-KKM UUID is not (service-UUID scan filter); then
+#            Configure All runs the full MD5 auth + getPara + cfg write
+#            over GATT to set a new advertisement period on the
 #            peripheral, and the result is POSTed to the host report
 #            server.
 #
