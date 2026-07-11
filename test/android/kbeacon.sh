@@ -186,9 +186,40 @@ LOGCAT_ADAPTER="$WORK_DIR/kbeacon_adapter.txt"
 "$ADB" -s "$EMULATOR_SERIAL" logcat -d '*:I' > "$LOGCAT_ADAPTER" 2>&1 || true
 assert_logcat "$LOGCAT_ADAPTER" "BLE adapter: BleAdapterOn" "netsim adapter is on"
 
-# --- Phase 2: strong signal, UUID filter ----------------------------------
-set_edittext 1 "-100" || true
+# The whole flow uses exactly TWO scans (weak, then strong). Android
+# silently drops a filtered scan once an app starts more than ~5 in a
+# 30-second window, and the earlier three-scan layout hit that limit
+# on its third scan (and starved retries). The weak-signal test runs
+# first; the strong-signal scan is left running so Configure All
+# reuses its device list instead of starting a third scan.
 
+# --- Phase 2: weak signal, RSSI threshold filter --------------------------
+# Threshold 20 dBm is above any real BLE RSSI, so every received
+# advertisement is ignored: the 'ignored' line proves the scan saw the
+# beacon and the RSSI filter dropped it.
+set_edittext 1 "20" || true
+tap_button "Start Scan" || echo "WARNING: could not tap Start Scan"
+wait_for_logcat "ignored FC:57:29:F4:F5:F6" 90 || true
+LOGCAT_WEAK="$WORK_DIR/kbeacon_weak.txt"
+"$ADB" -s "$EMULATOR_SERIAL" logcat -d '*:I' > "$LOGCAT_WEAK" 2>&1 || true
+assert_logcat "$LOGCAT_WEAK" "ignored FC:57:29:F4:F5:F6 rssi=" \
+    "advertisement below the threshold is ignored"
+if grep -q "found beacon KBPro-F4F5F6" "$LOGCAT_WEAK" 2>/dev/null; then
+    echo "FAIL: beacon below the RSSI threshold was still listed"
+    EXIT_CODE=1
+else
+    echo "PASS: beacon below the RSSI threshold stayed out of the list"
+fi
+tap_button "Stop Scan" || echo "WARNING: could not tap Stop Scan"
+# Space the two scans so the second stays under Android's scan-rate limit.
+sleep 10
+
+# --- Phase 3: strong signal + UUID filter, then configure -----------------
+set_edittext 1 "-100" || true
+set_edittext 0 "800" || true
+set_edittext 2 "http://10.0.2.2:$REPORT_PORT/report" || true
+
+"$ADB" -s "$EMULATOR_SERIAL" logcat -c 2>/dev/null || true
 tap_button "Start Scan" || echo "WARNING: could not tap Start Scan"
 wait_for_logcat "found beacon KBPro-F4F5F6" 90 || true
 LOGCAT_SCAN="$WORK_DIR/kbeacon_scan.txt"
@@ -203,47 +234,8 @@ else
 fi
 assert_ui_text "Scanning: yes | 1 device(s) found" "UI shows one discovered device"
 
-BEACON_RSSI=$(grep -o "found beacon KBPro-F4F5F6 [^ ]* rssi=[-0-9]*" "$LOGCAT_SCAN" \
-    | head -1 | grep -o 'rssi=[-0-9]*' | cut -d= -f2 || true)
-echo "Simulated KBeacon RSSI: ${BEACON_RSSI:-unknown}"
-tap_button "Stop Scan" || echo "WARNING: could not tap Stop Scan"
-sleep 1
-
-# --- Phase 3: weak signal, RSSI threshold filter ---------------------------
-if [ -n "${BEACON_RSSI:-}" ]; then
-    STRICT_THRESHOLD=$((BEACON_RSSI + 10))
-    if [ "$STRICT_THRESHOLD" -gt 20 ]; then
-        STRICT_THRESHOLD=20
-    fi
-    set_edittext 1 "$STRICT_THRESHOLD" || true
-    "$ADB" -s "$EMULATOR_SERIAL" logcat -c 2>/dev/null || true
-    tap_button "Start Scan" || echo "WARNING: could not tap Start Scan"
-    wait_for_logcat "ignored FC:57:29:F4:F5:F6" 90 || true
-    LOGCAT_WEAK="$WORK_DIR/kbeacon_weak.txt"
-    "$ADB" -s "$EMULATOR_SERIAL" logcat -d '*:I' > "$LOGCAT_WEAK" 2>&1 || true
-    assert_logcat "$LOGCAT_WEAK" "ignored FC:57:29:F4:F5:F6 rssi=" \
-        "advertisement below the threshold is ignored"
-    if grep -q "found beacon KBPro-F4F5F6" "$LOGCAT_WEAK" 2>/dev/null; then
-        echo "FAIL: beacon below the RSSI threshold was still listed"
-        EXIT_CODE=1
-    else
-        echo "PASS: beacon below the RSSI threshold stayed out of the list"
-    fi
-    tap_button "Stop Scan" || echo "WARNING: could not tap Stop Scan"
-    sleep 1
-else
-    echo "WARNING: no RSSI captured, skipping the weak-signal phase"
-    EXIT_CODE=1
-fi
-
-# --- Phase 4: configure over GATT + HTTP report ----------------------------
-set_edittext 1 "-100" || true
-set_edittext 0 "800" || true
-set_edittext 2 "http://10.0.2.2:$REPORT_PORT/report" || true
-
-"$ADB" -s "$EMULATOR_SERIAL" logcat -c 2>/dev/null || true
-tap_button "Start Scan" || echo "WARNING: could not tap Start Scan"
-wait_for_logcat "found beacon KBPro-F4F5F6" 90 || true
+# Configure All stops the scan internally and reuses the list above,
+# so no third scan is started.
 tap_button "Configure All" || echo "WARNING: could not tap Configure All"
 wait_for_logcat "configuration finished" 120 || true
 # The HTTP report completes asynchronously after the session finishes;
