@@ -252,12 +252,16 @@ kbScanFilterService :: BleServiceUuid
 kbScanFilterService = BleServiceUuid kbScanFilterServiceUuidText
 
 -- | Parse the RSSI threshold input. Refuses to scan on nonsense
--- rather than guessing a value.
+-- rather than guessing a value. The accepted range is the full signed
+-- byte (-128..127 dBm): real RSSI is negative, but virtual radios
+-- (the Android emulator's netsim reports a fixed +20) and very close
+-- devices can report positive values, and the threshold must be able
+-- to sit above them to filter them out.
 parseRssiThreshold :: Text -> Either Text Int
 parseRssiThreshold input =
   case TextRead.signed TextRead.decimal (Text.strip input) of
     Right (threshold, rest) ->
-      if Text.null rest && threshold >= -127 && threshold <= 20
+      if Text.null rest && threshold >= -128 && threshold <= 127
         then Right threshold
         else Left ("invalid RSSI threshold: " <> input)
     Left _ -> Left ("invalid RSSI threshold: " <> input)

@@ -216,15 +216,15 @@ export ADB EMULATOR_SERIAL KBEACON_APK PACKAGE ACTIVITY WORK_DIR
 export HATTER_TEST_SCRIPTS BUMBLE_PYTHON REPORT_PYTHON REPORT_PORT
 
 # run_with_retry LABEL COMMAND [ARGS...]
-# Same policy as hatter's emulator harness (retryable-crash.sh aborts
-# immediately on a deterministic native failure), but a lower attempt
-# cap: this is one self-contained flow, not hatter's whole suite, so a
-# persistent failure should surface in minutes. Each attempt cycles
-# the guest Bluetooth stack, which also resets Android's scan-rate
-# counter between attempts.
+# Same policy as hatter's emulator harness: up to 10 attempts, with
+# retryable-crash.sh aborting immediately on a deterministic native
+# failure. The high cap is deliberate: netsim's guest Bluetooth wedges
+# on roughly 40% of attempts (the scan finds nothing at all), so a
+# generous retry budget is what makes a clean discovery eventually
+# land. Each failed attempt cycles the guest stack to recover it.
 run_with_retry() {
     local label="$1"; shift
-    local max_attempts=4
+    local max_attempts=10
     local attempt=1
     local output_file="$WORK_DIR/retry_''${label}.log"
     while [ $attempt -le $max_attempts ]; do

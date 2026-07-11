@@ -7,9 +7,9 @@
 # the scan-rate note further down):
 #
 #   Phase 1  render + adapter: app renders, adapter reports on.
-#   Phase 2  weak signal: threshold 20 dBm (above any real RSSI), the
-#            beacon's advertisement is ignored and the list stays
-#            empty (RSSI proximity filter).
+#   Phase 2  weak signal: threshold 100 dBm (above netsim's fixed +20
+#            RSSI), the beacon's advertisement is ignored and the list
+#            stays empty (RSSI proximity filter).
 #   Phase 3  strong signal + configure + report: threshold -100, the
 #            simulated KBeacon is listed while the decoy advertising a
 #            non-KKM UUID is not (service-UUID scan filter); then
@@ -187,18 +187,19 @@ LOGCAT_ADAPTER="$WORK_DIR/kbeacon_adapter.txt"
 "$ADB" -s "$EMULATOR_SERIAL" logcat -d '*:I' > "$LOGCAT_ADAPTER" 2>&1 || true
 assert_logcat "$LOGCAT_ADAPTER" "BLE adapter: BleAdapterOn" "netsim adapter is on"
 
-# The whole flow uses exactly TWO scans (weak, then strong). Android
-# silently drops a filtered scan once an app starts more than ~5 in a
-# 30-second window, and the earlier three-scan layout hit that limit
-# on its third scan (and starved retries). The weak-signal test runs
-# first; the strong-signal scan is left running so Configure All
-# reuses its device list instead of starting a third scan.
+# The flow uses two scans (weak, then strong). The weak-signal test
+# runs first; the strong-signal scan is left running so Configure All
+# reuses its device list. Attempts where netsim's guest Bluetooth
+# wedges find nothing on either scan (a whole-attempt discovery
+# failure, not a scan-rate limit); run_with_retry re-runs the flow and
+# cycles the guest stack until a clean attempt lands, so keep the
+# attempt budget generous.
 
 # --- Phase 2: weak signal, RSSI threshold filter --------------------------
-# Threshold 20 dBm is above any real BLE RSSI, so every received
-# advertisement is ignored: the 'ignored' line proves the scan saw the
-# beacon and the RSSI filter dropped it.
-set_edittext 1 "20" || true
+# netsim reports a fixed +20 dBm RSSI for the virtual peripheral, so a
+# threshold of 100 sits above it: the beacon is filtered out and the
+# 'ignored' line proves the scan saw it and the RSSI filter dropped it.
+set_edittext 1 "100" || true
 tap_button "Start Scan" || echo "WARNING: could not tap Start Scan"
 wait_for_logcat "ignored FC:57:29:F4:F5:F6" 90 || true
 LOGCAT_WEAK="$WORK_DIR/kbeacon_weak.txt"
