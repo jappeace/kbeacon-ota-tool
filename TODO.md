@@ -2,8 +2,9 @@
 
 Everything the original Kotlin tool did is ported: beacon
 configuration over GATT, HTTP result reporting, battery percent and
-the KKM service-UUID scan filter all landed with the hatter GATT API
-(hatter #108). What remains:
+the KKM-only scan (a software identity gate on KKM's MAC prefix, see
+`identifyScanResult`) all landed with the hatter GATT API (hatter
+#108). What remains:
 
 ## 1. Renamed beacons on iOS
 

@@ -11,12 +11,13 @@
 #            RSSI), the beacon's advertisement is ignored and the list
 #            stays empty (RSSI proximity filter).
 #   Phase 3  strong signal + configure + report: threshold -100, the
-#            simulated KBeacon is listed while the decoy advertising a
-#            non-KKM UUID is not (service-UUID scan filter); then
-#            Configure All runs the full MD5 auth + getPara + cfg write
-#            over GATT to set a new advertisement period on the
-#            peripheral, and the result is POSTed to the host report
-#            server.
+#            simulated KBeacon (advertising 0x2080 only as service
+#            data, like real hardware) is listed while the decoy with
+#            a non-KKM address and UUID is not (KKM identity gate on
+#            the unfiltered scan); then Configure All runs the full
+#            MD5 auth + getPara + cfg write over GATT to set a new
+#            advertisement period on the peripheral, and the result is
+#            POSTed to the host report server.
 #
 # Required env vars (set by the emulator-ui.nix harness):
 #   ADB, EMULATOR_SERIAL, KBEACON_APK, PACKAGE, ACTIVITY, WORK_DIR,
@@ -227,12 +228,12 @@ wait_for_logcat "found beacon KBPro-F4F5F6" 90 || true
 LOGCAT_SCAN="$WORK_DIR/kbeacon_scan.txt"
 "$ADB" -s "$EMULATOR_SERIAL" logcat -d '*:I' > "$LOGCAT_SCAN" 2>&1 || true
 assert_logcat "$LOGCAT_SCAN" "found beacon KBPro-F4F5F6" \
-    "filtered scan lists the simulated KBeacon"
+    "scan lists the simulated KBeacon from its realistic advertisement"
 if grep -q "found beacon NotABeacon" "$LOGCAT_SCAN" 2>/dev/null; then
-    echo "FAIL: the 0x2080 scan filter let the decoy through"
+    echo "FAIL: the KKM identity gate let the decoy through"
     EXIT_CODE=1
 else
-    echo "PASS: decoy with a non-KKM service UUID stayed hidden"
+    echo "PASS: decoy with a non-KKM address stayed hidden"
 fi
 assert_ui_text "Scanning: yes | 1 device(s) found" "UI shows one discovered device"
 

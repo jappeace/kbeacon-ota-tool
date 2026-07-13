@@ -4,15 +4,16 @@
 # Joins the emulator's netsim virtual radio (same mechanism as
 # hatter's test/android/ble_peripheral.py) and runs two devices:
 #
-#   1. "KBPro-F4F5F6": a simulated KBeacon Pro. Advertises KKM's
-#      0x2080 ext-data service UUID (with a realistic battery byte in
-#      its service data) and serves the KBeacon configuration GATT
-#      protocol on FEA0/FEA1/FEA2: the MD5 auth handshake, getPara
-#      reads answered as fragmented report frames, and cfg writes that
-#      change the stored advertisement period.
+#   1. "KBPro-F4F5F6": a simulated KBeacon Pro. Advertises like the
+#      real hardware (KKM's 0x2080 ext-data UUID only as service
+#      data, with a realistic battery byte) and serves the KBeacon
+#      configuration GATT protocol on FEA0/FEA1/FEA2: the MD5 auth
+#      handshake, getPara reads answered as fragmented report frames,
+#      and cfg writes that change the stored advertisement period.
 #
-#   2. "NotABeacon": a decoy advertising a non-KKM service UUID. The
-#      app's 0x2080-filtered scan must never list it.
+#   2. "NotABeacon": a decoy advertising a non-KKM service UUID from
+#      a non-KKM address. The app's KKM identity gate must never list
+#      it.
 #
 # The protocol implementation mirrors test/../src/KBeacon/Protocol.hs
 # (both were written from KKM's android_kbeaconlib2 sources), so the
@@ -39,8 +40,10 @@ from bumble.hci import Address
 from bumble.transport import open_transport
 
 # FC:57:29 mimics KKM's BC:57:29 OUI while keeping the top two bits
-# set, which static random BLE addresses require. The name suffix
-# matches the MAC's low three bytes like factory-named KBeacons.
+# set, which static random BLE addresses require. The app's identity
+# gate masks those two bits (Protocol.macHasKkmOui), so this address
+# still counts as KKM. The name suffix matches the MAC's low three
+# bytes like factory-named KBeacons.
 KBEACON_ADDRESS = 'FC:57:29:F4:F5:F6'
 KBEACON_NAME = 'KBPro-F4F5F6'
 KBEACON_PASSWORD = b'0000000000000000'
@@ -269,16 +272,22 @@ async def run_kbeacon(transport_name):
             [write_characteristic, notify_characteristic],
         ))
 
-        # Advertisement: KKM devices carry the 0x2080 ext-data UUID in
-        # the 16-bit service list (what the app's filtered scan matches)
-        # plus a service-data element whose first byte is the battery
-        # percent. The name travels in the scan response.
+        # Advertisement: real KKM hardware carries the 0x2080 ext-data
+        # UUID ONLY as a service-data element (AD type 0x16, first
+        # payload byte is the battery percent), never in the 16-bit
+        # service-class UUID list. The tool once scan-filtered on that
+        # UUID with Android's setServiceUuid, which matches the
+        # service-class list alone, so it saw nothing in the field
+        # while this simulation (which then also advertised the UUID
+        # in the class list) kept CI green. Do not "help" a scan
+        # filter by re-adding the UUID to the class list: this frame
+        # must stay as unmatchable as the real one. The name travels
+        # in the scan response.
         ext_uuid_le = KKM_EXT_DATA_UUID_16.to_bytes(2, 'little')
         low_mac = mac_bytes(KBEACON_ADDRESS)[3:6]
         ext_service_data = bytes([KBEACON_BATTERY_PERCENT, 0x00, 0x01]) + low_mac
         device.advertising_data = bytes(AdvertisingData([
             (AdvertisingData.FLAGS, bytes([0x06])),
-            (AdvertisingData.COMPLETE_LIST_OF_16_BIT_SERVICE_CLASS_UUIDS, ext_uuid_le),
             (AdvertisingData.SERVICE_DATA_16_BIT_UUID, ext_uuid_le + ext_service_data),
         ]))
         scan_response = bytes(AdvertisingData([

@@ -29,5 +29,6 @@ lib.mkIOSLib {
     cp ${../src/KBeacon/Json.hs} KBeacon/Json.hs
     cp ${../src/KBeacon/Protocol.hs} KBeacon/Protocol.hs
     cp ${../src/KBeacon/Configure.hs} KBeacon/Configure.hs
+    cp ${../src/KBeacon/OtaApp.hs} KBeacon/OtaApp.hs
   '';
 }
