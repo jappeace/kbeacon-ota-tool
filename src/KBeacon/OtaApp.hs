@@ -730,8 +730,9 @@ data RateVerdict
 rateVerdict :: Either Text AdvPeriodMs -> Maybe Int -> RateVerdict
 rateVerdict expected measured =
   case (expected, measured) of
-    (Left _, _) -> RateUnknown
-    (_, Nothing) -> RateUnknown
+    (Left _, Nothing) -> RateUnknown
+    (Left _, Just _) -> RateUnknown
+    (Right _, Nothing) -> RateUnknown
     (Right expectedPeriod, Just measuredMs) ->
       if abs (measuredMs - unAdvPeriodMs expectedPeriod) * 4
            <= unAdvPeriodMs expectedPeriod
