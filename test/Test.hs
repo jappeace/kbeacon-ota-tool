@@ -9,12 +9,34 @@ module Main where
 
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.Text (Text)
+import Data.Text qualified as Text
+import Hatter (newActionState, runActionM, createAction, createOnChange)
+import Hatter.Ble (BleScanResult(..), BleDeviceAddress(..))
+import Hatter.Widget
+  ( ButtonConfig(..)
+  , LayoutItem(..)
+  , LayoutSettings(..)
+  , TextConfig(..)
+  , TextInputConfig(..)
+  , Widget(..)
+  )
+import KBeacon.Configure (BeaconTarget(..))
 import KBeacon.Json
   ( JsonValue(..)
   , lookupField
   , jsonInt
   , parseJson
   , renderJson
+  )
+import KBeacon.OtaApp
+  ( AppState(..)
+  , DiscoveredBeacon(..)
+  , appView
+  , defaultRssiThreshold
+  , newAppState
+  , onScanResult
   )
 import KBeacon.Protocol
   ( AdvSlot(..)
@@ -40,7 +62,8 @@ import KBeacon.Protocol
   , getParaRequestJson
   , macFromAddress
   , macFromName
-  , macForAuthentication
+  , ScanIdentity(..)
+  , identifyScanResult
   , negotiatedFrameBudget
   , parseBeaconNotification
   , parseParaResponse
@@ -63,6 +86,7 @@ main = defaultMain (testGroup "kbeacon-ota"
   , notificationTests
   , reassemblyTests
   , messageTests
+  , scanUiTests
   ])
 
 -- | The MAC used by the Python-generated auth vectors.
@@ -144,13 +168,24 @@ macTests = testGroup "mac derivation"
         (macFromName "KBPro-1A2B3C")
   , testCase "rejects names without a hex suffix" $
       assertEqual "no mac" Nothing (macFromName "office-beacon")
-  , testCase "prefers the address over the name" $
-      assertEqual "mac" (Just vectorMac)
-        (macForAuthentication "AA:BB:CC:DD:EE:FF" "KBPro-1A2B3C")
+  , testCase "identifies a KKM-prefixed address as a beacon" $
+      assertEqual "identity"
+        (KkmBeacon (BeaconMac (BS.pack [0xBC, 0x57, 0x29, 0x1A, 0x2B, 0x3C])))
+        (identifyScanResult "BC:57:29:1A:2B:3C" "KBPro-1A2B3C")
+  , testCase "accepts the static-random spelling of the KKM prefix" $
+      assertEqual "identity"
+        (KkmBeacon (BeaconMac (BS.pack [0xFC, 0x57, 0x29, 0xF4, 0xF5, 0xF6])))
+        (identifyScanResult "FC:57:29:F4:F5:F6" "KBPro-F4F5F6")
+  , testCase "the address verdict beats a KKM-looking name" $
+      assertEqual "identity" ForeignDevice
+        (identifyScanResult "AA:BB:CC:DD:EE:FF" "KBPro-1A2B3C")
   , testCase "falls back to the name on iOS-style addresses" $
-      assertEqual "mac"
-        (Just (BeaconMac (BS.pack [0xBC, 0x57, 0x29, 0x1A, 0x2B, 0x3C])))
-        (macForAuthentication "8B7A9E31-2C44-4A0F-9E7B-5D6F0A1B2C3D" "KBPro-1A2B3C")
+      assertEqual "identity"
+        (KkmBeacon (BeaconMac (BS.pack [0xBC, 0x57, 0x29, 0x1A, 0x2B, 0x3C])))
+        (identifyScanResult "8B7A9E31-2C44-4A0F-9E7B-5D6F0A1B2C3D" "KBPro-1A2B3C")
+  , testCase "cannot decide an iOS address without a factory name" $
+      assertEqual "identity" IdentityUnknown
+        (identifyScanResult "8B7A9E31-2C44-4A0F-9E7B-5D6F0A1B2C3D" "office speaker")
   ]
 
 authTests :: TestTree
@@ -311,3 +346,137 @@ isLeft (Right _) = False
 -- | Unwrap the reassembly buffer for assertions.
 unAssembly :: ReportAssembly -> ByteString
 unAssembly = unReportAssembly
+
+-- | Integration tests for the signal-to-UI path: the scan callback
+-- the app registers with the platform ('onScanResult') is fed
+-- fabricated results, and the widget tree the app registers as its
+-- view ('appView') must reflect them. The redraw hook stands in for
+-- the platform's render loop, so the tests also prove the app asks
+-- for a repaint when (and only when) the list changed.
+scanUiTests :: TestTree
+scanUiTests = testGroup "scan signal to ui"
+  [ testCase "a KBeacon signal adds a listed row and repaints" $ do
+      (appState, repaints) <- newCountingAppState
+      textsBefore <- renderedAppTexts appState
+      assertBool "beacon must not be listed before the signal"
+        (not (any (Text.isInfixOf "KBPro-4D5E6F") textsBefore))
+      onScanResult appState defaultRssiThreshold androidKBeaconSignal
+      repaintCount <- readIORef repaints
+      assertEqual "repaints after the signal" 1 repaintCount
+      textsAfter <- renderedAppTexts appState
+      assertBool "beacon row rendered after the signal"
+        (any (Text.isInfixOf "KBPro-4D5E6F") textsAfter)
+      assertBool "device count reflects the discovery"
+        (any (Text.isInfixOf "1 device(s) found") textsAfter)
+  , testCase "a repeated advertisement neither duplicates nor repaints" $ do
+      (appState, repaints) <- newCountingAppState
+      onScanResult appState defaultRssiThreshold androidKBeaconSignal
+      onScanResult appState defaultRssiThreshold androidKBeaconSignal
+      beacons <- readIORef (stateBeacons appState)
+      assertEqual "listed once" 1 (length beacons)
+      repaintCount <- readIORef repaints
+      assertEqual "repainted once" 1 repaintCount
+  , testCase "a weak signal stays out of the list until it strengthens" $ do
+      (appState, repaints) <- newCountingAppState
+      onScanResult appState defaultRssiThreshold
+        androidKBeaconSignal { bsrRssi = -80 }
+      weakBeacons <- readIORef (stateBeacons appState)
+      assertEqual "not listed while weak" 0 (length weakBeacons)
+      weakRepaints <- readIORef repaints
+      assertEqual "no repaint while weak" 0 weakRepaints
+      onScanResult appState defaultRssiThreshold androidKBeaconSignal
+      strongBeacons <- readIORef (stateBeacons appState)
+      assertEqual "listed once strong" 1 (length strongBeacons)
+  , testCase "foreign hardware is never listed" $ do
+      (appState, repaints) <- newCountingAppState
+      onScanResult appState defaultRssiThreshold BleScanResult
+        { bsrDeviceName = "NotABeacon"
+        , bsrDeviceAddress = BleDeviceAddress "F0:F1:F2:F3:F4:F5"
+        , bsrRssi = -30
+        }
+      beacons <- readIORef (stateBeacons appState)
+      assertEqual "not listed" 0 (length beacons)
+      repaintCount <- readIORef repaints
+      assertEqual "no repaint" 0 repaintCount
+  , testCase "the netsim static-random KKM prefix is listed with its MAC" $ do
+      (appState, _) <- newCountingAppState
+      onScanResult appState defaultRssiThreshold BleScanResult
+        { bsrDeviceName = "KBPro-F4F5F6"
+        , bsrDeviceAddress = BleDeviceAddress "FC:57:29:F4:F5:F6"
+        , bsrRssi = -40
+        }
+      beacons <- readIORef (stateBeacons appState)
+      assertEqual "auth mac from the advertised address"
+        [Just (BeaconMac (BS.pack [0xFC, 0x57, 0x29, 0xF4, 0xF5, 0xF6]))]
+        (map (targetMac . beaconTarget) beacons)
+  , testCase "an unnamed iOS callback waits for the named scan response" $ do
+      (appState, repaints) <- newCountingAppState
+      onScanResult appState defaultRssiThreshold
+        iosKBeaconSignal { bsrDeviceName = "" }
+      unnamedBeacons <- readIORef (stateBeacons appState)
+      assertEqual "not listed without a name" 0 (length unnamedBeacons)
+      onScanResult appState defaultRssiThreshold iosKBeaconSignal
+      beacons <- readIORef (stateBeacons appState)
+      assertEqual "auth mac reconstructed from the name"
+        [Just (BeaconMac (BS.pack [0xBC, 0x57, 0x29, 0x1A, 0x2B, 0x3C]))]
+        (map (targetMac . beaconTarget) beacons)
+      repaintCount <- readIORef repaints
+      assertEqual "repainted for the named result" 1 repaintCount
+  ]
+
+-- | A KBeacon Pro advertisement as Android delivers it: the real MAC
+-- with KKM's public OUI, well above 'defaultRssiThreshold'.
+androidKBeaconSignal :: BleScanResult
+androidKBeaconSignal = BleScanResult
+  { bsrDeviceName = "KBPro-4D5E6F"
+  , bsrDeviceAddress = BleDeviceAddress "BC:57:29:4D:5E:6F"
+  , bsrRssi = -42
+  }
+
+-- | The same beacon as iOS delivers it: an opaque per-phone UUID for
+-- the address, so only the factory name identifies it.
+iosKBeaconSignal :: BleScanResult
+iosKBeaconSignal = BleScanResult
+  { bsrDeviceName = "KBPro-1A2B3C"
+  , bsrDeviceAddress = BleDeviceAddress "8B7A9E31-2C44-4A0F-9E7B-5D6F0A1B2C3D"
+  , bsrRssi = -42
+  }
+
+-- | App state whose redraw hook counts repaints, standing in for the
+-- platform's render loop.
+newCountingAppState :: IO (AppState, IORef Int)
+newCountingAppState = do
+  appState <- newAppState
+  repaints <- newIORef (0 :: Int)
+  writeIORef (stateRedraw appState) (modifyIORef' repaints (+ 1))
+  pure (appState, repaints)
+
+-- | Render the app's view with inert button and input handles and
+-- collect every text fragment the widget tree would display.
+renderedAppTexts :: AppState -> IO [Text]
+renderedAppTexts appState = do
+  actionState <- newActionState
+  (inertAction, inertOnChange) <- runActionM actionState $ do
+    action <- createAction (pure ())
+    onChange <- createOnChange (\_ -> pure ())
+    pure (action, onChange)
+  widget <- appView appState
+    inertAction inertAction inertAction inertAction inertAction
+    inertOnChange inertOnChange inertOnChange
+  pure (widgetTexts widget)
+
+-- | Every text fragment a widget tree renders: labels, button
+-- captions, input values and hints, in tree order.
+widgetTexts :: Widget -> [Text]
+widgetTexts = \case
+  Text config -> [tcLabel config]
+  Button config -> [bcLabel config]
+  TextInput config -> [tiValue config, tiHint config]
+  Column settings -> concatMap (widgetTexts . liWidget) (lsWidgets settings)
+  Row settings -> concatMap (widgetTexts . liWidget) (lsWidgets settings)
+  Stack items -> concatMap (widgetTexts . liWidget) items
+  Image _ -> []
+  WebView _ -> []
+  MapView _ -> []
+  Styled _ inner -> widgetTexts inner
+  Animated _ inner -> widgetTexts inner

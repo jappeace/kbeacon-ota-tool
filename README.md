@@ -11,10 +11,13 @@ Android APK and an iOS static library.
 
 ## Features
 
-- **Filtered scanning**: scans on KKM's `0x2080` service UUID, so only
-  KBeacon hardware shows up; deduplicates by address and drops beacons
-  below a configurable RSSI threshold (proximity limit, default
-  -50 dBm).
+- **KKM-only scanning**: scans unfiltered and gates results on KKM's
+  `BC:57:29` MAC prefix (name-derived on iOS), so only KBeacon
+  hardware shows up; deduplicates by address and drops beacons below
+  a configurable RSSI threshold (proximity limit, default -50 dBm).
+  A hardware `0x2080` service-UUID filter does not work: real
+  KBeacons advertise that UUID only as service data, which Android's
+  `ScanFilter.setServiceUuid` never matches.
 - **Configuration over GATT**: full KBeacon config protocol
   (`src/KBeacon/Protocol.hs`, reverse engineered from KKM's
   [android_kbeaconlib2](https://github.com/kkmhogen/android_kbeaconlib2)):
@@ -93,7 +96,7 @@ bumble-based KBeacon Pro simulator that speaks the same GATT protocol
 (`test/android/kbeacon_peripheral.py`):
 
 - a strong-signal KBeacon is discovered and listed;
-- a decoy advertising a non-KKM UUID is filtered out;
+- a decoy with a non-KKM address and UUID is kept off the list;
 - raising the RSSI threshold above the beacon's actual signal makes
   the same advertisement get ignored;
 - Configure All performs the full auth + read + write handshake

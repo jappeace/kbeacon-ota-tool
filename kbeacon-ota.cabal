@@ -22,11 +22,13 @@ library
   exposed-modules:
       KBeacon.Configure
       KBeacon.Json
+      KBeacon.OtaApp
       KBeacon.Protocol
   hs-source-dirs: src
   build-depends:
       base       >= 4.9 && < 5
     , bytestring < 1
+    , containers < 1
     , cryptohash-md5 < 1
     , hatter
     , text       < 3
@@ -40,12 +42,8 @@ executable kbeacon-ota
   ghc-options:   -threaded
   build-depends:
       base       >= 4.9 && < 5
-    , bytestring < 1
-    , containers < 1
     , hatter
     , kbeacon-ota
-    , text       < 3
-    , unwitch    >= 3.0.0 && < 4
 
 test-suite unit
   import:        common-options
@@ -55,6 +53,8 @@ test-suite unit
   build-depends:
       base       >= 4.9 && < 5
     , bytestring < 1
+    , hatter
     , kbeacon-ota
     , tasty      < 2
     , tasty-hunit < 1
+    , text       < 3

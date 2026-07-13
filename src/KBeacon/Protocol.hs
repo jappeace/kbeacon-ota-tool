@@ -20,12 +20,12 @@ module KBeacon.Protocol
     kbConfigServiceUuidText
   , kbWriteCharacteristicUuidText
   , kbNotifyCharacteristicUuidText
-  , kbScanFilterServiceUuidText
     -- * Device identity
   , BeaconMac(..)
   , macFromAddress
   , macFromName
-  , macForAuthentication
+  , ScanIdentity(..)
+  , identifyScanResult
     -- * Auth handshake
   , BeaconPassword(..)
   , defaultBeaconPassword
@@ -107,18 +107,6 @@ kbWriteCharacteristicUuidText = "0000FEA1-0000-1000-8000-00805F9B34FB"
 kbNotifyCharacteristicUuidText :: Text
 kbNotifyCharacteristicUuidText = "0000FEA2-0000-1000-8000-00805F9B34FB"
 
--- | Service UUID to scan-filter on. KBeacon Pro connectable
--- advertisements carry the KKM "ext data" UUID 0x2080 in the service
--- list (KBUtility.PARCE_UUID_EXT_DATA).
---
--- Decision: filter on 0x2080 rather than Eddystone 0xFEAA or the
--- iBeacon manufacturer prefix, which KKM's own KBeaconsMgr also
--- matches. 0x2080 is KKM-specific, so the scan list only contains
--- beacons this tool can actually configure; Eddystone/iBeacon would
--- also match other vendors' hardware.
-kbScanFilterServiceUuidText :: Text
-kbScanFilterServiceUuidText = "00002080-0000-1000-8000-00805F9B34FB"
-
 -- | The 6 bytes of a beacon's Bluetooth MAC address, most significant
 -- byte first (the order it is printed in "AA:BB:CC:DD:EE:FF").
 newtype BeaconMac = BeaconMac { unBeaconMac :: ByteString }
@@ -172,13 +160,64 @@ macFromName name =
       Nothing -> Nothing
     else Nothing
 
--- | Best-effort MAC for the auth handshake: the scan address when it
--- is a real MAC (Android), otherwise the name suffix (iOS).
-macForAuthentication :: Text -> Text -> Maybe BeaconMac
-macForAuthentication address name =
+-- | What a scan result tells us about the advertising device.
+data ScanIdentity
+  = KkmBeacon BeaconMac
+    -- ^ A KKM beacon this tool can configure, with the MAC the auth
+    -- digest is keyed on.
+  | ForeignDevice
+    -- ^ Definitely another vendor's hardware (the advertised MAC
+    -- carries a non-KKM prefix); safe to remember the address and
+    -- never reconsider it during this scan.
+  | IdentityUnknown
+    -- ^ Not decidable yet: an opaque iOS address without a usable
+    -- factory name. The name often arrives in a later scan-response
+    -- callback, so the address must not be written off.
+  deriving (Show, Eq)
+
+-- | Classify one scan result. On Android the address is the real MAC
+-- and its vendor prefix decides; on iOS (opaque address) the factory
+-- name suffix reconstructs the MAC, see 'macFromName'.
+--
+-- Decision: identify KBeacons in software instead of a hardware scan
+-- filter. The tool used to scan with an Android ScanFilter on KKM's
+-- 0x2080 service UUID, which matched nothing on real hardware: real
+-- KBeacon advertisements carry 0x2080 only in the service DATA field
+-- (AD type 0x16), while ScanFilter.setServiceUuid matches the
+-- advertised service-class UUID list (AD types 0x02/0x03). KKM's own
+-- KBeaconsMgr works around this by OR-ing four filters (Eddystone
+-- FEAA, 0x2080, iBeacon and KKM manufacturer data) and then
+-- identifying KKM frames while parsing advertisement payloads;
+-- hatter's scan API exposes neither multiple filters nor payloads, so
+-- the tool scans unfiltered and selects on KKM's MAC prefix, which is
+-- more selective than KKM's filter list anyway (other vendors'
+-- Eddystone or iBeacon hardware never matches).
+identifyScanResult :: Text -> Text -> ScanIdentity
+identifyScanResult address name =
   case macFromAddress address of
-    Just mac -> Just mac
-    Nothing  -> macFromName name
+    Just mac ->
+      if macHasKkmOui mac
+        then KkmBeacon mac
+        else ForeignDevice
+    Nothing -> case macFromName name of
+      Just mac -> KkmBeacon mac
+      Nothing -> IdentityUnknown
+
+-- | Whether the MAC starts with KKM's OUI BC:57:29, ignoring the top
+-- two bits of the first byte (masked, BC becomes 3C).
+--
+-- Decision: mask the two address-type bits instead of comparing the
+-- first byte exactly. Real KBeacons use their public IEEE address
+-- BC:57:29:xx:xx:xx, but virtual radios must use static random
+-- addresses, which require the top two bits set: the emulator test's
+-- simulated fleet mimics KKM as FC:57:29:xx:xx:xx. The mask accepts
+-- both spellings of the KKM prefix while other vendors stay excluded.
+macHasKkmOui :: BeaconMac -> Bool
+macHasKkmOui (BeaconMac mac) =
+  BS.length mac == 6
+    && BS.index mac 0 .&. 0x3F == 0xBC .&. 0x3F
+    && BS.index mac 1 == 0x57
+    && BS.index mac 2 == 0x29
 
 -- | Connection password, 8 to 16 characters. All KBeacons ship with
 -- 'defaultBeaconPassword'.
