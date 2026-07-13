@@ -5,11 +5,16 @@
 -- write a new advertisement interval to each of them, optionally
 -- reporting every result to an HTTP endpoint.
 --
--- The scan runs unfiltered and selects KKM beacons by their MAC
--- identity (see 'identifyScanResult' for why a hardware filter is not
--- usable), drops beacons below a configurable RSSI threshold (the
--- "proximity" idea of the original Kotlin tool) and deduplicates by
--- address. Configure All then walks the discovered list with
+-- The app opens on a permission page; once both runtime permissions
+-- are granted it moves to the scanner page and the permission UI is
+-- gone. The scan runs unfiltered and identifies KKM beacons by their
+-- 0x2080 service data (with MAC-prefix and factory-name fallbacks,
+-- see 'identifyScanResult'), drops beacons below a configurable RSSI
+-- threshold (the "proximity" idea of the original Kotlin tool) and
+-- deduplicates by address. Repeated advertisements refresh a listed
+-- beacon's RSSI and battery and measure its actual advertisement
+-- interval, which colors the row green or red against the expected
+-- interval input. Configure All then walks the discovered list with
 -- "KBeacon.Configure".
 --
 -- Action creation order matters: hatter's iOS simulator harness
@@ -18,24 +23,32 @@
 --
 -- Decision: the app lives in the library instead of the executable so
 -- the test suite can drive the exact functions the platform calls:
--- 'onScanResult' is the registered scan callback and 'appView' the
--- registered view builder, and the signal-to-UI integration test
--- feeds one and inspects the other. @app/Main.hs@ only re-exports
--- 'otaAppMain'.
+-- 'onScanResultAt' is the registered scan callback (with the clock
+-- injected) and 'appView' the registered view builder, and the
+-- signal-to-UI integration tests feed one and inspect the other.
+-- @app/Main.hs@ only re-exports 'otaAppMain'.
 module KBeacon.OtaApp
   ( -- * Entry point
     otaAppMain
     -- * App state
   , AppState(..)
+  , AppPage(..)
   , DiscoveredBeacon(..)
   , BeaconStatus(..)
   , newAppState
   , defaultRssiThreshold
     -- * Platform callbacks (drivable from tests)
   , onScanResult
+  , onScanResultAt
   , appView
+    -- * Pure decision helpers
+  , continuePastPermissions
+  , scanRefusalForAdapter
+  , RateVerdict(..)
+  , rateVerdict
   ) where
 
+import Data.ByteString (ByteString)
 import Data.ByteString qualified as ByteString
 import Data.Char (intToDigit, toUpper)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef, modifyIORef')
@@ -45,6 +58,7 @@ import Data.Text (Text, pack)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as TextEncoding
 import Data.Text.Read qualified as TextRead
+import Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
 import Data.Word (Word8)
 import Foreign.Ptr (Ptr)
 import Hatter
@@ -63,9 +77,11 @@ import Hatter
 import Hatter.AppContext (AppContext(..), derefAppContext)
 import Hatter.Ble
   ( BleScanResult(..)
+  , BleAdapterStatus(..)
   , BleDeviceAddress(..)
   , BleState
   , checkBleAdapter
+  , serviceDataForUuid
   , startBleScan
   , stopBleScan
   )
@@ -78,16 +94,24 @@ import Hatter.Http
   , hrStatusCode
   , performRequest
   )
-import Hatter.Permission (PermissionState, Permission(..), requestPermission)
+import Hatter.Permission
+  ( PermissionState
+  , Permission(..)
+  , PermissionStatus(..)
+  , requestPermission
+  )
 import Hatter.Widget
-  ( InputType(..)
+  ( Color(..)
+  , InputType(..)
   , TextInputConfig(..)
   , Widget(..)
   , column
+  , defaultStyle
   , row
   , scrollColumn
   , text
   , button
+  , wsTextColor
   )
 import KBeacon.Configure
   ( BeaconOutcome(..)
@@ -102,16 +126,34 @@ import KBeacon.Protocol
   , ScanIdentity(..)
   , defaultBeaconPassword
   , identifyScanResult
+  , kkmExtDataBattery
+  , kkmExtDataServiceUuidText
   , unAdvPeriodMs
   , unBeaconMac
   , validateAdvPeriod
   )
 import Unwitch.Convert.Word8 qualified as Word8
 
+-- | Which page the app shows. Permissions are dealt with once, on
+-- their own page; after that only the scanner is on screen.
+data AppPage
+  = PermissionPage
+  | ScannerPage
+  deriving (Show, Eq)
+
 -- | One beacon in the UI list.
 data DiscoveredBeacon = DiscoveredBeacon
   { beaconTarget :: BeaconTarget
   , beaconRssi :: Int
+  , beaconBattery :: Maybe Int
+    -- ^ Battery percent broadcast in the 0x2080 service data, when
+    -- the advertisement carried one.
+  , beaconLastSeenAt :: POSIXTime
+    -- ^ Arrival time of the latest advertisement, feeding the
+    -- interval measurement.
+  , beaconIntervalMs :: Maybe Int
+    -- ^ Measured advertisement interval (smoothed), Nothing until a
+    -- second advertisement arrives.
   , beaconStatus :: BeaconStatus
   , beaconReportNote :: Maybe Text
     -- ^ Outcome of the HTTP report for this beacon, when reporting is
@@ -120,7 +162,7 @@ data DiscoveredBeacon = DiscoveredBeacon
 
 -- | Lifecycle of a listed beacon.
 data BeaconStatus
-  = StatusDiscovered
+  = StatusFound
   | StatusConfiguring
   | StatusConfigured BeaconSuccess
   | StatusFailed Text
@@ -128,7 +170,8 @@ data BeaconStatus
 -- | All mutable app state, so the view function and the callbacks
 -- share one handle.
 data AppState = AppState
-  { stateBeacons :: IORef [DiscoveredBeacon]
+  { statePage :: IORef AppPage
+  , stateBeacons :: IORef [DiscoveredBeacon]
   , stateSeenAddresses :: IORef (Set Text)
   , stateAdvPeriodInput :: IORef Text
   , stateThresholdInput :: IORef Text
@@ -191,6 +234,7 @@ otaAppMain = do
 -- | Allocate the app state with its defaults.
 newAppState :: IO AppState
 newAppState = do
+  page <- newIORef PermissionPage
   beacons <- newIORef []
   seen <- newIORef Set.empty
   advPeriod <- newIORef "1000"
@@ -204,7 +248,8 @@ newAppState = do
   http <- newIORef Nothing
   redraw <- newIORef (pure ())
   pure AppState
-    { stateBeacons = beacons
+    { statePage = page
+    , stateBeacons = beacons
     , stateSeenAddresses = seen
     , stateAdvPeriodInput = advPeriod
     , stateThresholdInput = threshold
@@ -237,7 +282,8 @@ checkAdapterAction appState = do
   status <- checkBleAdapter
   setStatus appState ("BLE adapter: " <> pack (show status))
 
--- | Request the BLE permission set hatter exposes from Haskell.
+-- | Request the BLE permission set hatter exposes from Haskell, then
+-- leave the permission page when both are granted.
 -- BLUETOOTH_CONNECT (needed by connectGatt on API 31 and later) is
 -- not reachable through Hatter.Permission; MainActivity.onCreate
 -- requests it natively at startup.
@@ -249,25 +295,56 @@ requestPermissionsAction appState = do
     Just permissionState ->
       requestPermission permissionState PermissionBluetooth $ \bluetoothStatus -> do
         platformLog ("BLUETOOTH_SCAN permission: " <> pack (show bluetoothStatus))
-        requestPermission permissionState PermissionLocation $ \locationStatus ->
+        requestPermission permissionState PermissionLocation $ \locationStatus -> do
           platformLog ("ACCESS_FINE_LOCATION permission: " <> pack (show locationStatus))
+          continuePastPermissions appState bluetoothStatus locationStatus
 
--- | Start the unfiltered scan; 'onScanResult' gates on KKM identity,
--- the RSSI threshold and dedup.
+-- | Move to the scanner page when both permissions are granted; a
+-- denied permission keeps the permission page up with a status
+-- saying which one is missing.
+continuePastPermissions :: AppState -> PermissionStatus -> PermissionStatus -> IO ()
+continuePastPermissions appState bluetoothStatus locationStatus =
+  case (bluetoothStatus, locationStatus) of
+    (PermissionGranted, PermissionGranted) -> do
+      writeIORef (statePage appState) ScannerPage
+      setStatus appState "permissions granted"
+    (PermissionDenied, PermissionDenied) ->
+      setStatus appState "bluetooth scan and location permissions denied"
+    (PermissionDenied, PermissionGranted) ->
+      setStatus appState "bluetooth scan permission denied"
+    (PermissionGranted, PermissionDenied) ->
+      setStatus appState "location permission denied"
+
+-- | Why a scan cannot start given this adapter state; only an
+-- adapter that reports on can scan.
+scanRefusalForAdapter :: BleAdapterStatus -> Maybe Text
+scanRefusalForAdapter status = case status of
+  BleAdapterOn -> Nothing
+  BleAdapterOff -> Just "bluetooth is off, turn it on to scan"
+  BleAdapterUnauthorized -> Just "bluetooth permission missing, cannot scan"
+  BleAdapterUnsupported -> Just "this device does not support bluetooth LE"
+
+-- | Start the unfiltered scan after checking the adapter;
+-- 'onScanResultAt' gates on KKM identity, the RSSI threshold and
+-- dedup.
 startScanAction :: AppState -> IO ()
 startScanAction appState = do
-  mBleState <- readIORef (stateBle appState)
-  thresholdText <- readIORef (stateThresholdInput appState)
-  case (mBleState, parseRssiThreshold thresholdText) of
-    (Nothing, _) -> setStatus appState "BLE state not ready"
-    (Just _, Left thresholdError) -> setStatus appState thresholdError
-    (Just bleState, Right threshold) -> do
-      writeIORef (stateBeacons appState) []
-      writeIORef (stateSeenAddresses appState) Set.empty
-      writeIORef (stateScanning appState) True
-      startBleScan bleState (onScanResult appState threshold)
-      setStatus appState
-        ("scanning for KBeacons (RSSI over " <> pack (show threshold) <> " dBm)")
+  adapterStatus <- checkBleAdapter
+  case scanRefusalForAdapter adapterStatus of
+    Just refusal -> setStatus appState refusal
+    Nothing -> do
+      mBleState <- readIORef (stateBle appState)
+      thresholdText <- readIORef (stateThresholdInput appState)
+      case (mBleState, parseRssiThreshold thresholdText) of
+        (Nothing, _) -> setStatus appState "BLE state not ready"
+        (Just _, Left thresholdError) -> setStatus appState thresholdError
+        (Just bleState, Right threshold) -> do
+          writeIORef (stateBeacons appState) []
+          writeIORef (stateSeenAddresses appState) Set.empty
+          writeIORef (stateScanning appState) True
+          startBleScan bleState (onScanResult appState threshold)
+          setStatus appState
+            ("scanning for KBeacons (RSSI over " <> pack (show threshold) <> " dBm)")
 
 -- | Parse the RSSI threshold input. Refuses to scan on nonsense
 -- rather than guessing a value. The accepted range is the full signed
@@ -284,26 +361,35 @@ parseRssiThreshold input =
         else Left ("invalid RSSI threshold: " <> input)
     Left _ -> Left ("invalid RSSI threshold: " <> input)
 
--- | Scan callback: KKM identity gate, then the RSSI threshold and
--- dedup of the original Scanner.kt (including its log lines).
---
--- The scan is unfiltered, so this fires for every BLE device in
--- range and must stay quiet about them: an address that was already
--- listed or already judged foreign returns silently, a fresh foreign
--- device is logged once when its address is remembered. A weak
--- KBeacon is NOT remembered: its signal fluctuates, so a later
--- stronger advertisement must still be able to list it. An
--- undecidable result (opaque iOS address, no usable name yet) is
--- dropped without memory because a later scan response may carry the
--- name that identifies it.
+-- | The scan callback as registered with the platform: stamps the
+-- arrival time and hands over to 'onScanResultAt'.
 onScanResult :: AppState -> Int -> BleScanResult -> IO ()
 onScanResult appState threshold result = do
+  now <- getPOSIXTime
+  onScanResultAt now appState threshold result
+
+-- | Scan callback body: KKM identity gate, then the RSSI threshold
+-- and dedup of the original Scanner.kt (including its log lines).
+--
+-- The scan is unfiltered, so this fires for every BLE device in
+-- range and must stay quiet about them: an address already judged
+-- foreign returns silently, a fresh foreign device is logged once
+-- when its address is remembered, and a repeated advertisement from
+-- a listed beacon refreshes that beacon ('refreshBeaconSighting')
+-- instead of being dropped. A weak KBeacon is NOT remembered: its
+-- signal fluctuates, so a later stronger advertisement must still be
+-- able to list it. An undecidable result (opaque iOS address, no
+-- name or MAC marker yet) is dropped without memory because a later
+-- callback may carry what identifies it.
+onScanResultAt :: POSIXTime -> AppState -> Int -> BleScanResult -> IO ()
+onScanResultAt now appState threshold result = do
   let address = unBleDeviceAddress (bsrDeviceAddress result)
       rssi = bsrRssi result
+      extData = scanResultExtData result
   seen <- readIORef (stateSeenAddresses appState)
   if Set.member address seen
-    then pure ()
-    else case identifyScanResult address (bsrDeviceName result) of
+    then refreshBeaconSighting now appState result extData
+    else case identifyScanResult extData address (bsrDeviceName result) of
       IdentityUnknown -> pure ()
       ForeignDevice -> do
         modifyIORef' (stateSeenAddresses appState) (Set.insert address)
@@ -316,12 +402,75 @@ onScanResult appState threshold result = do
             modifyIORef' (stateBeacons appState) (\beacons -> DiscoveredBeacon
               { beaconTarget = scanResultTarget mac result
               , beaconRssi = rssi
-              , beaconStatus = StatusDiscovered
+              , beaconBattery = extData >>= kkmExtDataBattery
+              , beaconLastSeenAt = now
+              , beaconIntervalMs = Nothing
+              , beaconStatus = StatusFound
               , beaconReportNote = Nothing
               } : beacons)
             platformLog ("found beacon " <> bsrDeviceName result
               <> " " <> address <> " rssi=" <> pack (show rssi))
             requestRepaint appState
+
+-- | KKM's 0x2080 service data from a scan result. A malformed
+-- advertisement (Left) reads as no service data here: hatter's scan
+-- dispatch has already logged every defect loudly, with the address.
+scanResultExtData :: BleScanResult -> Maybe ByteString
+scanResultExtData result = case bsrAdvertisement result of
+  Left _ -> Nothing
+  Right advertisement ->
+    serviceDataForUuid kkmExtDataServiceUuidText advertisement
+
+-- | Refresh a listed beacon from a repeated advertisement: RSSI and
+-- battery update, and the advertisement interval is measured from
+-- the arrival times. Repeats from addresses that are remembered but
+-- not listed (foreign devices) do nothing.
+refreshBeaconSighting :: POSIXTime -> AppState -> BleScanResult -> Maybe ByteString -> IO ()
+refreshBeaconSighting now appState result extData = do
+  let address = unBleDeviceAddress (bsrDeviceAddress result)
+  beacons <- readIORef (stateBeacons appState)
+  if any (beaconHasAddress address) beacons
+    then do
+      modifyIORef' (stateBeacons appState) (map (\beacon ->
+        if beaconHasAddress address beacon
+          then refreshedBeacon now (bsrRssi result) (extData >>= kkmExtDataBattery) beacon
+          else beacon))
+      requestRepaint appState
+    else pure ()
+
+-- | Does this row belong to the given scan address?
+beaconHasAddress :: Text -> DiscoveredBeacon -> Bool
+beaconHasAddress address beacon =
+  unBleDeviceAddress (targetAddress (beaconTarget beacon)) == address
+
+-- | One beacon row after another advertisement arrived: new RSSI,
+-- battery when the advertisement carried one, and the measured
+-- interval updated from the arrival delta.
+--
+-- Decision: the interval is an exponentially smoothed average
+-- (3 parts old, 1 part new) rather than the raw last delta. Android
+-- delivers scan results with jitter and the radio adds a random
+-- 0..10 ms advertising delay per event, so the raw delta jumps
+-- around; smoothing shows a stable number that still converges
+-- within a few advertisements after a period change. A delta of
+-- zero milliseconds (batched duplicate delivery) is not a
+-- measurement and is skipped.
+refreshedBeacon :: POSIXTime -> Int -> Maybe Int -> DiscoveredBeacon -> DiscoveredBeacon
+refreshedBeacon now rssi battery beacon =
+  let deltaMs = round ((now - beaconLastSeenAt beacon) * 1000) :: Int
+      interval = if deltaMs <= 0
+        then beaconIntervalMs beacon
+        else case beaconIntervalMs beacon of
+          Nothing -> Just deltaMs
+          Just old -> Just ((old * 3 + deltaMs) `div` 4)
+  in beacon
+    { beaconRssi = rssi
+    , beaconBattery = case battery of
+        Just percent -> Just percent
+        Nothing -> beaconBattery beacon
+    , beaconLastSeenAt = now
+    , beaconIntervalMs = interval
+    }
 
 -- | Build the configure target for an accepted scan result.
 scanResultTarget :: BeaconMac -> BleScanResult -> BeaconTarget
@@ -449,7 +598,7 @@ outcomeReportJson outcome =
       ])
 
 -- | Print MAC bytes as "AA:BB:CC:DD:EE:FF".
-formatMacBytes :: ByteString.ByteString -> Text
+formatMacBytes :: ByteString -> Text
 formatMacBytes bytes =
   Text.intercalate ":" (map formatMacByte (ByteString.unpack bytes))
 
@@ -479,7 +628,7 @@ onConfigureFinished appState = do
   writeIORef (stateConfiguring appState) False
   setStatus appState "configuration finished"
 
--- | Build the widget tree from the current state.
+-- | Build the widget tree for the current page.
 appView
   :: AppState
   -> Action -> Action -> Action -> Action -> Action
@@ -488,17 +637,42 @@ appView
 appView appState
         onCheckAdapter onRequestPerms onStartScan onStopScan onConfigureAll
         onPeriodChange onThresholdChange onReportUrlChange = do
+  page <- readIORef (statePage appState)
+  case page of
+    PermissionPage -> permissionPageView appState onRequestPerms
+    ScannerPage -> scannerPageView appState
+      onCheckAdapter onStartScan onStopScan onConfigureAll
+      onPeriodChange onThresholdChange onReportUrlChange
+
+-- | The one-time permission page; 'continuePastPermissions' replaces
+-- it with the scanner page once both permissions are granted.
+permissionPageView :: AppState -> Action -> IO Widget
+permissionPageView appState onRequestPerms = do
+  statusLine <- readIORef (stateStatusLine appState)
+  pure (column
+    [ text "Finding KBeacons needs the bluetooth scan and location permissions."
+    , button "Request Permissions" onRequestPerms
+    , text ("Status: " <> statusLine)
+    ])
+
+-- | The scanner page: inputs, the scan toggle, and the beacon list.
+scannerPageView
+  :: AppState
+  -> Action -> Action -> Action -> Action
+  -> OnChange -> OnChange -> OnChange
+  -> IO Widget
+scannerPageView appState
+                onCheckAdapter onStartScan onStopScan onConfigureAll
+                onPeriodChange onThresholdChange onReportUrlChange = do
   beacons <- readIORef (stateBeacons appState)
   advPeriod <- readIORef (stateAdvPeriodInput appState)
   threshold <- readIORef (stateThresholdInput appState)
   reportUrl <- readIORef (stateReportUrlInput appState)
   scanning <- readIORef (stateScanning appState)
   statusLine <- readIORef (stateStatusLine appState)
+  let expectedPeriod = parseAdvPeriod advPeriod
   pure (column
-    [ row
-        [ button "Check Adapter" onCheckAdapter
-        , button "Request Permissions" onRequestPerms
-        ]
+    [ button "Check Adapter" onCheckAdapter
     , TextInput TextInputConfig
         { tiInputType  = InputNumber
         , tiHint       = "Adv interval (ms)"
@@ -524,22 +698,67 @@ appView appState
         , tiAutoFocus  = False
         }
     , row
-        [ button "Start Scan" onStartScan
-        , button "Stop Scan" onStopScan
+        [ if scanning
+            then button "Stop Scan" onStopScan
+            else button "Start Scan" onStartScan
         , button "Configure All" onConfigureAll
         ]
     , text ("Status: " <> statusLine)
     , text ("Scanning: " <> (if scanning then "yes" else "no")
         <> " | " <> pack (show (length beacons)) <> " device(s) found")
-    , scrollColumn (map beaconRow (reverse beacons))
+    , scrollColumn (map (beaconRow expectedPeriod) (reverse beacons))
     ])
 
--- | One row per discovered beacon.
-beaconRow :: DiscoveredBeacon -> Widget
-beaconRow beacon =
+-- | How a beacon's measured advertisement interval relates to the
+-- expected interval input.
+data RateVerdict
+  = RateUnknown
+    -- ^ No measurement yet, or no valid expected interval to compare
+    -- against.
+  | RateMatching
+  | RateDeviating
+  deriving (Show, Eq)
+
+-- | Compare the measured interval with the expected one.
+--
+-- Decision: matching means within 25% of the expected interval. BLE
+-- adds a random 0..10 ms delay to every advertising event and the
+-- platform delivers results with its own jitter, so exact matching
+-- would flag healthy beacons; a beacon actually configured to a
+-- different period (the closest firmware steps are well over 25%
+-- apart) still lands far outside the band.
+rateVerdict :: Either Text AdvPeriodMs -> Maybe Int -> RateVerdict
+rateVerdict expected measured =
+  case (expected, measured) of
+    (Left _, _) -> RateUnknown
+    (_, Nothing) -> RateUnknown
+    (Right expectedPeriod, Just measuredMs) ->
+      if abs (measuredMs - unAdvPeriodMs expectedPeriod) * 4
+           <= unAdvPeriodMs expectedPeriod
+        then RateMatching
+        else RateDeviating
+
+-- | Row text color for a rate verdict: green when the beacon
+-- advertises at the expected rate, red when it deviates, unstyled
+-- while unknown.
+rateColor :: RateVerdict -> Maybe Color
+rateColor verdict = case verdict of
+  RateUnknown -> Nothing
+  RateMatching -> Just (Color 0x2E 0x7D 0x32 0xFF)
+  RateDeviating -> Just (Color 0xC6 0x28 0x28 0xFF)
+
+-- | One row per discovered beacon, colored by its rate verdict.
+beaconRow :: Either Text AdvPeriodMs -> DiscoveredBeacon -> Widget
+beaconRow expectedPeriod beacon =
   let target = beaconTarget beacon
+      batteryText = case beaconBattery beacon of
+        Just percent -> " | " <> pack (show percent) <> "%"
+        Nothing -> ""
+      rateText = case beaconIntervalMs beacon of
+        Just intervalMs -> " | ~" <> pack (show intervalMs) <> " ms"
+        Nothing -> ""
       statusText = case beaconStatus beacon of
-        StatusDiscovered -> "discovered"
+        StatusFound -> "found"
         StatusConfiguring -> "configuring..."
         StatusConfigured success ->
           "set to " <> pack (show (unAdvPeriodMs (successAppliedPeriod success))) <> " ms"
@@ -550,11 +769,15 @@ beaconRow beacon =
       reportText = case beaconReportNote beacon of
         Just note -> " | " <> note
         Nothing -> ""
-  in column
-    [ row
-        [ text (targetName target)
-        , text (" | " <> unBleDeviceAddress (targetAddress target))
-        , text (" | RSSI: " <> pack (show (beaconRssi beacon)))
+      rowWidget = column
+        [ row
+            [ text (targetName target)
+            , text (" | " <> unBleDeviceAddress (targetAddress target))
+            , text (" | RSSI: " <> pack (show (beaconRssi beacon)))
+            , text (batteryText <> rateText)
+            ]
+        , text ("   " <> statusText <> reportText)
         ]
-    , text ("   " <> statusText <> reportText)
-    ]
+  in case rateColor (rateVerdict expectedPeriod (beaconIntervalMs beacon)) of
+    Nothing -> rowWidget
+    Just color -> Styled defaultStyle { wsTextColor = Just color } rowWidget

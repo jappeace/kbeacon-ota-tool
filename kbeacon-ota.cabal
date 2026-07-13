@@ -58,3 +58,4 @@ test-suite unit
     , tasty      < 2
     , tasty-hunit < 1
     , text       < 3
+    , time

@@ -11,13 +11,22 @@ Android APK and an iOS static library.
 
 ## Features
 
-- **KKM-only scanning**: scans unfiltered and gates results on KKM's
-  `BC:57:29` MAC prefix (name-derived on iOS), so only KBeacon
-  hardware shows up; deduplicates by address and drops beacons below
-  a configurable RSSI threshold (proximity limit, default -50 dBm).
-  A hardware `0x2080` service-UUID filter does not work: real
-  KBeacons advertise that UUID only as service data, which Android's
-  `ScanFilter.setServiceUuid` never matches.
+- **KKM-only scanning**: scans unfiltered and identifies KBeacons by
+  their `0x2080` service data, the same signal KKM's own library
+  uses, with KKM's `BC:57:29` MAC prefix and the factory name as
+  fallbacks for payload-less frames; deduplicates by address and
+  drops beacons below a configurable RSSI threshold (proximity
+  limit, default -50 dBm). A hardware `0x2080` service-UUID filter
+  does not work: real KBeacons advertise that UUID only as service
+  data, which Android's `ScanFilter.setServiceUuid` never matches.
+- **Live rows**: every listed beacon shows RSSI, the battery percent
+  broadcast in its service data (no connection needed), and its
+  measured advertisement interval, colored green when it matches the
+  expected interval input and red when it deviates.
+- **One-time permission page**: the app opens on a permission page
+  and moves to the scanner once bluetooth-scan and location are
+  granted; Start Scan refuses with a clear status while the
+  bluetooth adapter is off.
 - **Configuration over GATT**: full KBeacon config protocol
   (`src/KBeacon/Protocol.hs`, reverse engineered from KKM's
   [android_kbeaconlib2](https://github.com/kkmhogen/android_kbeaconlib2)):
@@ -29,7 +38,6 @@ Android APK and an iOS static library.
   beacon's outcome is POSTed as JSON (name, mac, applied period,
   battery percent with a warning flag under 98%, or the failure
   reason).
-- **Battery percent** per beacon, read from the config over GATT.
 
 ## Usage
 
