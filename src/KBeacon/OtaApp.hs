@@ -78,6 +78,7 @@ import Hatter.AppContext (AppContext(..), derefAppContext)
 import Hatter.Ble
   ( BleScanResult(..)
   , BleAdapterStatus(..)
+  , BleAdvertisementWithErrors(..)
   , BleDeviceAddress(..)
   , BleState
   , checkBleAdapter
@@ -413,11 +414,14 @@ onScanResultAt now appState threshold result = do
             requestRepaint appState
 
 -- | KKM's 0x2080 service data from a scan result. A malformed
--- advertisement (Left) reads as no service data here: hatter's scan
--- dispatch has already logged every defect loudly, with the address.
+-- advertisement still contributes its salvaged partial (hatter's
+-- scan dispatch has already logged every defect loudly, with the
+-- address): a beacon with one garbled structure must not lose its
+-- valid identity data.
 scanResultExtData :: BleScanResult -> Maybe ByteString
 scanResultExtData result = case bsrAdvertisement result of
-  Left _ -> Nothing
+  Left withErrors ->
+    serviceDataForUuid kkmExtDataServiceUuid (partialAdvertisement withErrors)
   Right advertisement ->
     serviceDataForUuid kkmExtDataServiceUuid advertisement
 
