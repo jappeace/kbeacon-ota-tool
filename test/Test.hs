@@ -510,6 +510,28 @@ scanUiTests = testGroup "scan signal to ui"
       assertEqual "auth mac recovered from the service data"
         [Just (BeaconMac (BS.pack [0xBC, 0x57, 0x29, 0x4D, 0x5E, 0x6F]))]
         (map (targetMac . beaconTarget) beacons)
+  , testCase "a malformed advertisement still identifies via its salvage" $ do
+      -- Valid 0x2080 service data followed by a truncated structure:
+      -- hatter reports the defect but salvages the partial, and the
+      -- identity gate must use it. The opaque address and non-factory
+      -- name guarantee the ext data is the only identity source, so
+      -- this fails if the Left branch degrades to "no service data".
+      let malformedAdvertisement = parseBleAdvertisement (BS.pack
+            [ 0x02, 0x01, 0x06
+            , 0x09, 0x16, 0x80, 0x20, 85, 0x00, 0x01, 0x4D, 0x5E, 0x6F
+            , 0x09, 0x16, 0xED
+            ])
+      assertBool "fixture must be a defective parse"
+        (isLeft malformedAdvertisement)
+      (appState, _) <- newScannerAppState
+      onScanResultAt 10 appState defaultRssiThreshold
+        iosRenamedKBeaconSignal { bsrAdvertisement = malformedAdvertisement }
+      beacons <- readIORef (stateBeacons appState)
+      assertEqual "identity recovered from the salvaged service data"
+        [Just (BeaconMac (BS.pack [0xBC, 0x57, 0x29, 0x4D, 0x5E, 0x6F]))]
+        (map (targetMac . beaconTarget) beacons)
+      assertEqual "battery from the salvaged service data"
+        [Just 85] (map beaconBattery beacons)
   , testCase "a payload-less unnamed iOS callback waits for the name" $ do
       (appState, repaints) <- newScannerAppState
       onScanResultAt 10 appState defaultRssiThreshold
