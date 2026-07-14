@@ -127,7 +127,7 @@ import KBeacon.Protocol
   , defaultBeaconPassword
   , identifyScanResult
   , kkmExtDataBattery
-  , kkmExtDataServiceUuidText
+  , kkmExtDataServiceUuid
   , unAdvPeriodMs
   , unBeaconMac
   , validateAdvPeriod
@@ -419,7 +419,7 @@ scanResultExtData :: BleScanResult -> Maybe ByteString
 scanResultExtData result = case bsrAdvertisement result of
   Left _ -> Nothing
   Right advertisement ->
-    serviceDataForUuid kkmExtDataServiceUuidText advertisement
+    serviceDataForUuid kkmExtDataServiceUuid advertisement
 
 -- | Refresh a listed beacon from a repeated advertisement: RSSI and
 -- battery update, and the advertisement interval is measured from

@@ -9,9 +9,9 @@
       },
       "branch": "feat/ble-advertisement-payloads",
       "submodules": false,
-      "revision": "7b6199a37acb6f7566d675d55a9781f9866bfbb8",
-      "url": "https://github.com/jappeace-sloth/hatter/archive/7b6199a37acb6f7566d675d55a9781f9866bfbb8.tar.gz",
-      "hash": "sha256-Wu+cIol4roho27120P7wwcUO2zdMoaRMK6VUTbZuzEQ="
+      "revision": "119e58cc4b50ad1be3f801efdac4d300f25d72c4",
+      "url": "https://github.com/jappeace-sloth/hatter/archive/119e58cc4b50ad1be3f801efdac4d300f25d72c4.tar.gz",
+      "hash": "sha256-O6534XCfuTYXkoOfn45JVA139IY74xVoHe+psFIVcPY="
     },
     "mobile-core-tools": {
       "type": "Git",

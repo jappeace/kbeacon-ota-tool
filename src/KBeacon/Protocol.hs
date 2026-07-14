@@ -26,7 +26,7 @@ module KBeacon.Protocol
   , macFromName
   , ScanIdentity(..)
   , identifyScanResult
-  , kkmExtDataServiceUuidText
+  , kkmExtDataServiceUuid
   , kkmExtDataBattery
   , kkmExtDataMac
     -- * Auth handshake
@@ -80,6 +80,8 @@ import Data.Char (isHexDigit)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as TextEncoding
+import Data.UUID.Types (UUID)
+import Data.UUID.Types qualified as UUID
 import Data.Word (Word8)
 import KBeacon.Json
   ( JsonValue(..)
@@ -223,11 +225,13 @@ identifyScanResult maybeExtData address name =
           Just mac -> KkmBeacon mac
           Nothing -> IdentityUnknown
 
--- | KKM's "ext data" service UUID (0x2080), the key under which
--- KBeacons broadcast 'kkmExtDataBattery' and 'kkmExtDataMac' as
--- service data. Pass to 'Hatter.BleAdvertisement.serviceDataForUuid'.
-kkmExtDataServiceUuidText :: Text
-kkmExtDataServiceUuidText = "00002080-0000-1000-8000-00805F9B34FB"
+-- | KKM's "ext data" service UUID (0x2080 aliased into the
+-- Bluetooth base UUID), the key under which KBeacons broadcast
+-- 'kkmExtDataBattery' and 'kkmExtDataMac' as service data. Pass to
+-- 'Hatter.BleAdvertisement.serviceDataForUuid'; built with the total
+-- 'UUID.fromWords', so no literal can be malformed.
+kkmExtDataServiceUuid :: UUID
+kkmExtDataServiceUuid = UUID.fromWords 0x00002080 0x00001000 0x80000080 0x5F9B34FB
 
 -- | Battery percent from a 0x2080 service data payload: byte 0,
 -- clamped to 100, and only trusted when the payload is longer than
