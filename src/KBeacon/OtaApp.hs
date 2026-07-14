@@ -775,7 +775,11 @@ beaconRow expectedPeriod beacon =
             [ text (targetName target)
             , text (" | " <> unBleDeviceAddress (targetAddress target))
             , text (" | RSSI: " <> pack (show (beaconRssi beacon)))
-            , text (batteryText <> rateText)
+            -- Battery and rate are separate nodes so the emulator
+            -- test can exact-match the deterministic battery text
+            -- while the measured rate varies.
+            , text batteryText
+            , text rateText
             ]
         , text ("   " <> statusText <> reportText)
         ]
