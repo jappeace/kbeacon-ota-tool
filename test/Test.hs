@@ -30,6 +30,7 @@ import Hatter.Widget
   , TextConfig(..)
   , TextInputConfig(..)
   , Widget(..)
+  , wsWidth
   )
 import KBeacon.Configure (BeaconTarget(..))
 import KBeacon.Json
@@ -411,9 +412,26 @@ scanUiTests = testGroup "scan signal to ui"
       assertBool "serial cell rendered after the signal"
         (elem "4D5E6F" textsAfter)
       assertBool "battery cell from the advertisement rendered"
-        (elem " | 85" textsAfter)
+        (elem "85" textsAfter)
       assertBool "device count reflects the discovery"
         (any (Text.isInfixOf "1 device(s) found") textsAfter)
+  , testCase "header and row cells share column widths" $ do
+      (appState, _) <- newScannerAppState
+      onScanResultAt 10 appState defaultRssiThreshold androidKBeaconSignal
+      onScanResultAt 11 appState defaultRssiThreshold BleScanResult
+        { bsrDeviceName = "KBPro-F4F5F6"
+        , bsrDeviceAddress = BleDeviceAddress "FC:57:29:F4:F5:F6"
+        , bsrRssi = -30
+        , bsrAdvertisement = Right emptyBleAdvertisement
+        }
+      widths <- fmap widgetWidths (renderedAppWidget appState)
+      assertEqual "four fixed columns in header and both rows"
+        12 (length widths)
+      let columnsOf index = take 4 (drop (index * 4) widths)
+      assertEqual "row one aligns with the header"
+        (columnsOf 0) (columnsOf 1)
+      assertEqual "row two aligns with the header"
+        (columnsOf 0) (columnsOf 2)
   , testCase "the table sorts the strongest signal on top" $ do
       -- Insertion order middle, strong, weak: the prepend accumulator
       -- holds [weak, strong, middle] and its reverse [middle, strong,
@@ -722,6 +740,24 @@ widgetTexts = \case
   MapView _ -> []
   Styled _ inner -> widgetTexts inner
   Animated _ inner -> widgetTexts inner
+
+-- | Every fixed width applied via Styled wrappers, in tree order;
+-- how column alignment is observed.
+widgetWidths :: Widget -> [Double]
+widgetWidths = \case
+  Text _ -> []
+  Button _ -> []
+  TextInput _ -> []
+  Column settings -> concatMap (widgetWidths . liWidget) (lsWidgets settings)
+  Row settings -> concatMap (widgetWidths . liWidget) (lsWidgets settings)
+  Stack items -> concatMap (widgetWidths . liWidget) items
+  Image _ -> []
+  WebView _ -> []
+  MapView _ -> []
+  Styled style inner -> case wsWidth style of
+    Just width -> width : widgetWidths inner
+    Nothing -> widgetWidths inner
+  Animated _ inner -> widgetWidths inner
 
 -- | Every text color carried by glyph-bearing widgets, in tree
 -- order; how the rate coloring is observed. Colors live on the

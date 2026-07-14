@@ -248,7 +248,7 @@ fi
 assert_ui_text "Scanning: yes | 1 device(s) found" "UI shows one discovered device"
 # Battery 85 travels in the simulated 0x2080 service data and must
 # show in the table's battery cell without connecting.
-assert_ui_text " | 85" "battery shown from the advertisement"
+assert_ui_text "85" "battery shown from the advertisement"
 
 # Configure All stops the scan internally and reuses the list above,
 # so no third scan is started.

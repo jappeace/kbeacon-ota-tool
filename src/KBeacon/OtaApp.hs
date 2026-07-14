@@ -111,10 +111,12 @@ import Hatter.Widget
   , Widget(..)
   , coloredText
   , column
+  , defaultStyle
   , row
   , scrollColumn
   , text
   , button
+  , wsWidth
   )
 import KBeacon.Configure
   ( BeaconOutcome(..)
@@ -752,15 +754,39 @@ scannerPageView appState
         (sortBy (comparing (Down . beaconRssi)) beacons))
     ])
 
--- | The table's column headers.
+-- | The table's column headers, sharing the row cells' widths so the
+-- columns align (hatter #245).
 beaconTableHeader :: Widget
 beaconTableHeader = row
-  [ text "serial"
-  , text " | rssi"
-  , text " | battery"
-  , text " | rate (ms)"
-  , text " | status"
+  [ tableCell serialColumnWidth Nothing "serial"
+  , tableCell rssiColumnWidth Nothing "rssi"
+  , tableCell batteryColumnWidth Nothing "battery"
+  , tableCell rateColumnWidth Nothing "rate (ms)"
+  , tableCell Nothing Nothing "status"
   ]
+
+-- | Fixed column widths in platform pixels (hatter's wsWidth unit,
+-- like wsPadding); the status column stays content-sized. Chosen for
+-- the emulator's 1080 px portrait width and roomy on phones.
+serialColumnWidth :: Maybe Double
+serialColumnWidth = Just 220
+
+rssiColumnWidth :: Maybe Double
+rssiColumnWidth = Just 130
+
+batteryColumnWidth :: Maybe Double
+batteryColumnWidth = Just 170
+
+rateColumnWidth :: Maybe Double
+rateColumnWidth = Just 200
+
+-- | One table cell: optionally fixed-width, optionally colored.
+tableCell :: Maybe Double -> Maybe Color -> Text -> Widget
+tableCell width color content =
+  let inner = rowText color content
+  in case width of
+    Nothing -> inner
+    Just cellWidth -> Styled defaultStyle { wsWidth = Just cellWidth } inner
 
 -- | How a beacon's measured advertisement interval relates to the
 -- expected interval input.
@@ -820,11 +846,11 @@ beaconTableRow expectedPeriod beacon =
         Just note -> " | " <> note
         Nothing -> ""
   in row
-    [ rowText color (beaconSerial beacon)
-    , rowText color (" | " <> pack (show (beaconRssi beacon)))
-    , rowText color (" | " <> batteryCell)
-    , rowText color (" | " <> beaconRateCell beacon)
-    , rowText color (" | " <> statusText <> reportText)
+    [ tableCell serialColumnWidth color (beaconSerial beacon)
+    , tableCell rssiColumnWidth color (pack (show (beaconRssi beacon)))
+    , tableCell batteryColumnWidth color batteryCell
+    , tableCell rateColumnWidth color (beaconRateCell beacon)
+    , tableCell Nothing color (statusText <> reportText)
     ]
 
 -- | A beacon's serial number: the hex digits of its MAC's low three
