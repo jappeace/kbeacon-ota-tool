@@ -107,13 +107,12 @@ import Hatter.Widget
   , InputType(..)
   , TextInputConfig(..)
   , Widget(..)
+  , coloredText
   , column
-  , defaultStyle
   , row
   , scrollColumn
   , text
   , button
-  , wsTextColor
   )
 import KBeacon.Configure
   ( BeaconOutcome(..)
@@ -716,6 +715,7 @@ scannerPageView appState
         , tiValue      = advPeriod
         , tiOnChange   = onPeriodChange
         , tiFontConfig = Nothing
+        , tiTextColor  = Nothing
         , tiAutoFocus  = False
         }
     , TextInput TextInputConfig
@@ -724,6 +724,7 @@ scannerPageView appState
         , tiValue      = threshold
         , tiOnChange   = onThresholdChange
         , tiFontConfig = Nothing
+        , tiTextColor  = Nothing
         , tiAutoFocus  = False
         }
     , TextInput TextInputConfig
@@ -732,6 +733,7 @@ scannerPageView appState
         , tiValue      = reportUrl
         , tiOnChange   = onReportUrlChange
         , tiFontConfig = Nothing
+        , tiTextColor  = Nothing
         , tiAutoFocus  = False
         }
     , row
@@ -824,11 +826,9 @@ beaconRow expectedPeriod beacon =
     ]
 
 -- | A row text fragment carrying the rate color when there is one.
--- The color must sit on each text node individually: a WidgetStyle
--- applies only to the single node it wraps (Hatter.Render.applyStyle
--- sets the property on that node), so coloring the row's column
--- would set text color on a container and change nothing visible.
+-- Text color lives on the text config itself (hatter #242), so it
+-- can only ever land on glyph-bearing nodes.
 rowText :: Maybe Color -> Text -> Widget
 rowText color content = case color of
   Nothing -> text content
-  Just chosen -> Styled defaultStyle { wsTextColor = Just chosen } (text content)
+  Just chosen -> coloredText chosen content

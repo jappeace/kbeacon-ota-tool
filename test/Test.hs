@@ -30,7 +30,6 @@ import Hatter.Widget
   , TextConfig(..)
   , TextInputConfig(..)
   , Widget(..)
-  , WidgetStyle(..)
   )
 import KBeacon.Configure (BeaconTarget(..))
 import KBeacon.Json
@@ -697,20 +696,25 @@ widgetTexts = \case
   Styled _ inner -> widgetTexts inner
   Animated _ inner -> widgetTexts inner
 
--- | Every text-color override applied in a widget tree, in tree
--- order; how the rate coloring is observed.
+-- | Every text color carried by glyph-bearing widgets, in tree
+-- order; how the rate coloring is observed. Colors live on the
+-- configs themselves since hatter #242.
 widgetTextColors :: Widget -> [Color]
 widgetTextColors = \case
-  Text _ -> []
-  Button _ -> []
-  TextInput _ -> []
+  Text config -> case tcTextColor config of
+    Just color -> [color]
+    Nothing -> []
+  Button config -> case bcTextColor config of
+    Just color -> [color]
+    Nothing -> []
+  TextInput config -> case tiTextColor config of
+    Just color -> [color]
+    Nothing -> []
   Column settings -> concatMap (widgetTextColors . liWidget) (lsWidgets settings)
   Row settings -> concatMap (widgetTextColors . liWidget) (lsWidgets settings)
   Stack items -> concatMap (widgetTextColors . liWidget) items
   Image _ -> []
   WebView _ -> []
   MapView _ -> []
-  Styled style inner -> case wsTextColor style of
-    Just color -> color : widgetTextColors inner
-    Nothing -> widgetTextColors inner
+  Styled _ inner -> widgetTextColors inner
   Animated _ inner -> widgetTextColors inner

@@ -4,14 +4,14 @@
       "type": "Git",
       "repository": {
         "type": "GitHub",
-        "owner": "jappeace",
+        "owner": "jappeace-sloth",
         "repo": "hatter"
       },
-      "branch": "master",
+      "branch": "feat/text-color-in-configs",
       "submodules": false,
-      "revision": "b08827fc90da85eea3f5a3efd7ec85cf1a36d395",
-      "url": "https://github.com/jappeace/hatter/archive/b08827fc90da85eea3f5a3efd7ec85cf1a36d395.tar.gz",
-      "hash": "sha256-2we91fNLvzz2mL01zFraa5PXy/IN7vnJor/4CchPIyk="
+      "revision": "da7c188ac3667f32f2e3bfbd44d7811271e13dde",
+      "url": "https://github.com/jappeace-sloth/hatter/archive/da7c188ac3667f32f2e3bfbd44d7811271e13dde.tar.gz",
+      "hash": "sha256-9p92EFoBDUkDC3uSh6/7lqSDFNO8N/TbVuAl+1bCybo="
     },
     "mobile-core-tools": {
       "type": "Git",
