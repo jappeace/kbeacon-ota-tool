@@ -10,6 +10,7 @@ module Main where
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.List (nub)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Hatter (newActionState, runActionM, createAction, createOnChange)
@@ -435,7 +436,7 @@ scanUiTests = testGroup "scan signal to ui"
       beaconsAfterThree <- readIORef (stateBeacons appState)
       assertEqual "smoothed three parts old, one part new"
         [Just 1050] (map beaconIntervalMs beaconsAfterThree)
-  , testCase "the measured rate colors the row against the expected interval" $ do
+  , testCase "the measured rate colors every text of the row" $ do
       (appState, _) <- newScannerAppState
       writeIORef (stateAdvPeriodInput appState) "1000"
       onScanResultAt 10 appState defaultRssiThreshold androidKBeaconSignal
@@ -443,15 +444,20 @@ scanUiTests = testGroup "scan signal to ui"
       assertEqual "no color before a measurement" 0 (length colorsBefore)
       onScanResultAt 11 appState defaultRssiThreshold androidKBeaconSignal
       colorsMatching <- fmap widgetTextColors (renderedAppWidget appState)
-      assertEqual "one colored row at the expected rate" 1 (length colorsMatching)
+      -- Every text node of the row must carry the color itself: a
+      -- style on the row's container would change nothing visible.
+      assertEqual "all six row texts colored at the expected rate"
+        6 (length colorsMatching)
+      assertEqual "one uniform color" 1 (length (nub colorsMatching))
       (slowState, _) <- newScannerAppState
       writeIORef (stateAdvPeriodInput slowState) "1000"
       onScanResultAt 10 slowState defaultRssiThreshold androidKBeaconSignal
       onScanResultAt 15 slowState defaultRssiThreshold androidKBeaconSignal
       colorsDeviating <- fmap widgetTextColors (renderedAppWidget slowState)
-      assertEqual "one colored row at a deviating rate" 1 (length colorsDeviating)
+      assertEqual "all six row texts colored at a deviating rate"
+        6 (length colorsDeviating)
       assertBool "matching and deviating rates color differently"
-        (colorsMatching /= colorsDeviating)
+        (nub colorsMatching /= nub colorsDeviating)
   , testCase "rateVerdict tolerates jitter but flags another period" $ do
       assertEqual "exact" RateMatching
         (rateVerdict (validateAdvPeriod 1000) (Just 1000))
@@ -545,8 +551,21 @@ scanUiTests = testGroup "scan signal to ui"
         (map (targetMac . beaconTarget) beacons)
       repaintCount <- readIORef repaints
       assertEqual "repainted for the named result" 1 repaintCount
+  , testCase "granted permissions skip the permission page at first render" $ do
+      -- The desktop permission stub reports granted, standing in for
+      -- a device where both permissions were kept from an earlier
+      -- run: the first render must land directly on the scanner.
+      (appState, _) <- newCountingAppState
+      texts <- renderedAppTexts appState
+      assertBool "scanner shown immediately"
+        (any (Text.isInfixOf "Start Scan") texts)
+      page <- readIORef (statePage appState)
+      assertEqual "page flipped by the probe" ScannerPage page
   , testCase "the app opens on the permission page and grants move it on" $ do
       (appState, _) <- newCountingAppState
+      -- Pretend the probe already ran and did not grant (the desktop
+      -- stub always grants, which the skip test above covers).
+      writeIORef (statePermissionProbed appState) True
       textsBefore <- renderedAppTexts appState
       assertBool "permission button shown"
         (any (Text.isInfixOf "Request Permissions") textsBefore)
@@ -562,6 +581,7 @@ scanUiTests = testGroup "scan signal to ui"
         (not (any (Text.isInfixOf "Request Permissions") textsAfter))
   , testCase "a denied permission keeps the permission page up" $ do
       (appState, _) <- newCountingAppState
+      writeIORef (statePermissionProbed appState) True
       continuePastPermissions appState PermissionGranted PermissionDenied
       page <- readIORef (statePage appState)
       assertEqual "page unchanged" PermissionPage page
