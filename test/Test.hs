@@ -403,17 +403,33 @@ scanUiTests = testGroup "scan signal to ui"
       (appState, repaints) <- newScannerAppState
       textsBefore <- renderedAppTexts appState
       assertBool "beacon must not be listed before the signal"
-        (not (any (Text.isInfixOf "KBPro-4D5E6F") textsBefore))
+        (not (any (Text.isInfixOf "4D5E6F") textsBefore))
       onScanResultAt 10 appState defaultRssiThreshold androidKBeaconSignal
       repaintCount <- readIORef repaints
       assertEqual "repaints after the signal" 1 repaintCount
       textsAfter <- renderedAppTexts appState
-      assertBool "beacon row rendered after the signal"
-        (any (Text.isInfixOf "KBPro-4D5E6F") textsAfter)
-      assertBool "battery from the advertisement rendered"
-        (any (Text.isInfixOf "85%") textsAfter)
+      assertBool "serial cell rendered after the signal"
+        (elem "4D5E6F" textsAfter)
+      assertBool "battery cell from the advertisement rendered"
+        (elem " | 85" textsAfter)
       assertBool "device count reflects the discovery"
         (any (Text.isInfixOf "1 device(s) found") textsAfter)
+  , testCase "the table sorts the strongest signal on top" $ do
+      (appState, _) <- newScannerAppState
+      onScanResultAt 10 appState defaultRssiThreshold
+        androidKBeaconSignal { bsrRssi = -45 }
+      onScanResultAt 11 appState defaultRssiThreshold BleScanResult
+        { bsrDeviceName = "KBPro-F4F5F6"
+        , bsrDeviceAddress = BleDeviceAddress "FC:57:29:F4:F5:F6"
+        , bsrRssi = -30
+        , bsrAdvertisement = Right emptyBleAdvertisement
+        }
+      texts <- renderedAppTexts appState
+      let position serial = length (takeWhile (/= serial) texts)
+      assertBool "both serials rendered"
+        (elem "F4F5F6" texts && elem "4D5E6F" texts)
+      assertBool "stronger signal renders first"
+        (position "F4F5F6" < position "4D5E6F")
   , testCase "a repeated advertisement refreshes the row, not duplicates it" $ do
       (appState, repaints) <- newScannerAppState
       onScanResultAt 10 appState defaultRssiThreshold androidKBeaconSignal
@@ -445,16 +461,16 @@ scanUiTests = testGroup "scan signal to ui"
       colorsMatching <- fmap widgetTextColors (renderedAppWidget appState)
       -- Every text node of the row must carry the color itself: a
       -- style on the row's container would change nothing visible.
-      assertEqual "all six row texts colored at the expected rate"
-        6 (length colorsMatching)
+      assertEqual "all five row cells colored at the expected rate"
+        5 (length colorsMatching)
       assertEqual "one uniform color" 1 (length (nub colorsMatching))
       (slowState, _) <- newScannerAppState
       writeIORef (stateAdvPeriodInput slowState) "1000"
       onScanResultAt 10 slowState defaultRssiThreshold androidKBeaconSignal
       onScanResultAt 15 slowState defaultRssiThreshold androidKBeaconSignal
       colorsDeviating <- fmap widgetTextColors (renderedAppWidget slowState)
-      assertEqual "all six row texts colored at a deviating rate"
-        6 (length colorsDeviating)
+      assertEqual "all five row cells colored at a deviating rate"
+        5 (length colorsDeviating)
       assertBool "matching and deviating rates color differently"
         (nub colorsMatching /= nub colorsDeviating)
   , testCase "rateVerdict tolerates jitter but flags another period" $ do

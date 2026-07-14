@@ -52,6 +52,8 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as ByteString
 import Data.Char (intToDigit, toUpper)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef, modifyIORef')
+import Data.List (sortBy)
+import Data.Ord (Down(..), comparing)
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text, pack)
@@ -745,8 +747,20 @@ scannerPageView appState
     , text ("Status: " <> statusLine)
     , text ("Scanning: " <> (if scanning then "yes" else "no")
         <> " | " <> pack (show (length beacons)) <> " device(s) found")
-    , scrollColumn (map (beaconRow expectedPeriod) (reverse beacons))
+    , beaconTableHeader
+    , scrollColumn (map (beaconTableRow expectedPeriod)
+        (sortBy (comparing (Down . beaconRssi)) beacons))
     ])
+
+-- | The table's column headers.
+beaconTableHeader :: Widget
+beaconTableHeader = row
+  [ text "serial"
+  , text " | rssi"
+  , text " | battery"
+  , text " | rate (ms)"
+  , text " | status"
+  ]
 
 -- | How a beacon's measured advertisement interval relates to the
 -- expected interval input.
@@ -787,43 +801,58 @@ rateColor verdict = case verdict of
   RateMatching -> Just (Color 0x2E 0x7D 0x32 0xFF)
   RateDeviating -> Just (Color 0xC6 0x28 0x28 0xFF)
 
--- | One row per discovered beacon, its texts colored by the rate
--- verdict.
-beaconRow :: Either Text AdvPeriodMs -> DiscoveredBeacon -> Widget
-beaconRow expectedPeriod beacon =
-  let target = beaconTarget beacon
-      color = rateColor (rateVerdict expectedPeriod (beaconIntervalMs beacon))
-      batteryText = case beaconBattery beacon of
-        Just percent -> " | " <> pack (show percent) <> "%"
-        Nothing -> ""
-      rateText = case beaconIntervalMs beacon of
-        Just intervalMs -> " | every ~" <> pack (show intervalMs) <> " ms"
-        Nothing -> ""
+-- | One table row per discovered beacon: serial, RSSI, battery, the
+-- device's rate and the status, each cell its own node (the emulator
+-- test exact-matches the deterministic cells) and colored by the
+-- rate verdict.
+beaconTableRow :: Either Text AdvPeriodMs -> DiscoveredBeacon -> Widget
+beaconTableRow expectedPeriod beacon =
+  let color = rateColor (rateVerdict expectedPeriod (beaconIntervalMs beacon))
+      batteryCell = case beaconBattery beacon of
+        Just percent -> pack (show percent)
+        Nothing -> "?"
       statusText = case beaconStatus beacon of
         StatusFound -> "not yet configured"
         StatusConfiguring -> "configuring..."
-        StatusConfigured success ->
-          "set to " <> pack (show (unAdvPeriodMs (successAppliedPeriod success))) <> " ms"
-            <> (case successBatteryPercent success of
-                 Just percent -> ", battery " <> pack (show percent) <> "%"
-                 Nothing -> "")
+        StatusConfigured _ -> "configured"
         StatusFailed failure -> "failed: " <> failure
       reportText = case beaconReportNote beacon of
         Just note -> " | " <> note
         Nothing -> ""
-  in column
-    [ row
-        [ rowText color (targetName target)
-        , rowText color (" | " <> unBleDeviceAddress (targetAddress target))
-        , rowText color (" | RSSI: " <> pack (show (beaconRssi beacon)))
-        -- Battery and rate are separate nodes so the emulator
-        -- test can exact-match the deterministic battery text
-        -- while the measured rate varies.
-        , rowText color batteryText
-        , rowText color rateText
-        ]
-    , rowText color ("   " <> statusText <> reportText)
+  in row
+    [ rowText color (beaconSerial beacon)
+    , rowText color (" | " <> pack (show (beaconRssi beacon)))
+    , rowText color (" | " <> batteryCell)
+    , rowText color (" | " <> beaconRateCell beacon)
+    , rowText color (" | " <> statusText <> reportText)
     ]
+
+-- | A beacon's serial number: the hex digits of its MAC's low three
+-- bytes, the same digits factory names carry after their "KBPro-"
+-- prefix, so renamed beacons show a stable serial too. Falls back to
+-- the name's dash-suffix when no MAC is known.
+beaconSerial :: DiscoveredBeacon -> Text
+beaconSerial beacon = case targetMac (beaconTarget beacon) of
+  Just mac -> Text.concat
+    (map formatMacByte (ByteString.unpack (ByteString.drop 3 (unBeaconMac mac))))
+  Nothing -> Text.takeWhileEnd (/= '-') (targetName (beaconTarget beacon))
+
+-- | The rate cell: the exact period once this beacon was configured,
+-- the measured estimate (tilde) while only observed, "?" until a
+-- second advertisement gives a measurement.
+beaconRateCell :: DiscoveredBeacon -> Text
+beaconRateCell beacon = case beaconStatus beacon of
+  StatusConfigured success ->
+    pack (show (unAdvPeriodMs (successAppliedPeriod success)))
+  StatusFound -> measuredRateCell (beaconIntervalMs beacon)
+  StatusConfiguring -> measuredRateCell (beaconIntervalMs beacon)
+  StatusFailed _ -> measuredRateCell (beaconIntervalMs beacon)
+
+-- | The measured half of 'beaconRateCell'.
+measuredRateCell :: Maybe Int -> Text
+measuredRateCell interval = case interval of
+  Just intervalMs -> "~" <> pack (show intervalMs)
+  Nothing -> "?"
 
 -- | A row text fragment carrying the rate color when there is one.
 -- Text color lives on the text config itself (hatter #242), so it
