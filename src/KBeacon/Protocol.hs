@@ -26,6 +26,9 @@ module KBeacon.Protocol
   , macFromName
   , ScanIdentity(..)
   , identifyScanResult
+  , kkmExtDataServiceUuid
+  , kkmExtDataBattery
+  , kkmExtDataMac
     -- * Auth handshake
   , BeaconPassword(..)
   , defaultBeaconPassword
@@ -77,6 +80,8 @@ import Data.Char (isHexDigit)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as TextEncoding
+import Data.UUID.Types (UUID)
+import Data.UUID.Types qualified as UUID
 import Data.Word (Word8)
 import KBeacon.Json
   ( JsonValue(..)
@@ -145,12 +150,10 @@ parseHexByte part =
 --
 -- Decision: needed because iOS never exposes MAC addresses to
 -- applications (CoreBluetooth hands out per-phone UUIDs) while the
--- auth MD5 is keyed on the MAC. KKM's own iOS library solves this by
--- parsing the MAC out of the raw advertisement service data, which
--- hatter's scan API does not expose (yet, see the README); the name
--- suffix carries the same three bytes for factory-named beacons.
--- Renamed beacons cannot be configured from iOS until hatter exposes
--- advertisement payloads.
+-- auth MD5 is keyed on the MAC. The primary iOS path is
+-- 'kkmExtDataMac' (the MAC bytes inside the 0x2080 service data,
+-- which is what KKM's own iOS library parses); the name suffix
+-- covers factory-named beacons whose frame carried no service data.
 macFromName :: Text -> Maybe BeaconMac
 macFromName name =
   let suffix = Text.takeEnd 6 name
@@ -175,9 +178,23 @@ data ScanIdentity
     -- callback, so the address must not be written off.
   deriving (Show, Eq)
 
--- | Classify one scan result. On Android the address is the real MAC
--- and its vendor prefix decides; on iOS (opaque address) the factory
--- name suffix reconstructs the MAC, see 'macFromName'.
+-- | Classify one scan result from its 0x2080 service data payload
+-- (when the advertisement carried one), its address and its name.
+--
+-- The service data is the primary signal: it is how KKM's own
+-- library recognises its hardware, so a device broadcasting it is a
+-- KBeacon regardless of its MAC prefix. The auth MAC is then the
+-- advertised address when it is a real MAC (Android reports the true
+-- address, which is what the beacon keys its auth digest on), the
+-- MAC bytes inside the service data ('kkmExtDataMac', which is how
+-- KKM's iOS library recovers MACs, including for renamed beacons),
+-- or the factory name suffix. A KBeacon whose MAC cannot be
+-- recovered yet stays 'IdentityUnknown' so a later callback carrying
+-- the name or the MAC marker can still list it.
+--
+-- Without service data (a KBeacon slot broadcasting pure
+-- iBeacon/Eddystone frames, or any other device) the MAC prefix
+-- decides on Android and the factory name on iOS.
 --
 -- Decision: identify KBeacons in software instead of a hardware scan
 -- filter. The tool used to scan with an Android ScanFilter on KKM's
@@ -188,20 +205,58 @@ data ScanIdentity
 -- KBeaconsMgr works around this by OR-ing four filters (Eddystone
 -- FEAA, 0x2080, iBeacon and KKM manufacturer data) and then
 -- identifying KKM frames while parsing advertisement payloads;
--- hatter's scan API exposes neither multiple filters nor payloads, so
--- the tool scans unfiltered and selects on KKM's MAC prefix, which is
--- more selective than KKM's filter list anyway (other vendors'
--- Eddystone or iBeacon hardware never matches).
-identifyScanResult :: Text -> Text -> ScanIdentity
-identifyScanResult address name =
+-- hatter delivers the payloads since jappeace/hatter#238, so the
+-- tool scans unfiltered and identifies on the 0x2080 service data
+-- exactly like KKM does, with the MAC prefix as the fallback for
+-- payload-less frames.
+identifyScanResult :: Maybe ByteString -> Text -> Text -> ScanIdentity
+identifyScanResult maybeExtData address name =
   case macFromAddress address of
     Just mac ->
       if macHasKkmOui mac
         then KkmBeacon mac
-        else ForeignDevice
-    Nothing -> case macFromName name of
-      Just mac -> KkmBeacon mac
-      Nothing -> IdentityUnknown
+        else case maybeExtData of
+          Just _ -> KkmBeacon mac
+          Nothing -> ForeignDevice
+    Nothing ->
+      case maybeExtData >>= kkmExtDataMac of
+        Just mac -> KkmBeacon mac
+        Nothing -> case macFromName name of
+          Just mac -> KkmBeacon mac
+          Nothing -> IdentityUnknown
+
+-- | KKM's "ext data" service UUID (0x2080 aliased into the
+-- Bluetooth base UUID), the key under which KBeacons broadcast
+-- 'kkmExtDataBattery' and 'kkmExtDataMac' as service data. Pass to
+-- 'Hatter.BleAdvertisement.serviceDataForUuid'; built with the total
+-- 'UUID.fromWords', so no literal can be malformed.
+kkmExtDataServiceUuid :: UUID
+kkmExtDataServiceUuid = UUID.fromWords 0x00002080 0x00001000 0x80000080 0x5F9B34FB
+
+-- | Battery percent from a 0x2080 service data payload: byte 0,
+-- clamped to 100, and only trusted when the payload is longer than
+-- two bytes, mirroring KKM's own parser
+-- (KBAdvPacketHandler.java: @batteryPercent = byExtenData[0]@ under
+-- @length > 2@, capped at 100).
+kkmExtDataBattery :: ByteString -> Maybe Int
+kkmExtDataBattery extData =
+  if BS.length extData > 2
+    then Just (min 100 (Word8.toInt (BS.index extData 0)))
+    else Nothing
+
+-- | The beacon's MAC recovered from a 0x2080 service data payload:
+-- when byte 1 (beacon type flags) is 0 and byte 2 is the marker 1,
+-- bytes 3 to 5 are the MAC's low three bytes under KKM's OUI. This
+-- mirrors KBAdvPacketHandler.swift, which is how KKM's iOS library
+-- learns MACs at all (and the only way for renamed beacons, whose
+-- name no longer encodes the MAC).
+kkmExtDataMac :: ByteString -> Maybe BeaconMac
+kkmExtDataMac extData =
+  if BS.length extData > 5
+      && BS.index extData 1 == 0x00
+      && BS.index extData 2 == 0x01
+    then Just (BeaconMac (kkmOuiPrefix <> BS.take 3 (BS.drop 3 extData)))
+    else Nothing
 
 -- | Whether the MAC starts with KKM's OUI BC:57:29, ignoring the top
 -- two bits of the first byte (masked, BC becomes 3C).

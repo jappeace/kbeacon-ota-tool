@@ -6,7 +6,9 @@
 # under various bluetooth signals. Ordered to use only two scans (see
 # the scan-rate note further down):
 #
-#   Phase 1  render + adapter: app renders, adapter reports on.
+#   Phase 1  render + permissions + adapter: app renders its
+#            permission page, granting moves it to the scanner page,
+#            adapter reports on.
 #   Phase 2  weak signal: threshold 100 dBm (above netsim's fixed +20
 #            RSSI), the beacon's advertisement is ignored and the list
 #            stays empty (RSSI proximity filter).
@@ -182,6 +184,16 @@ wait_for_logcat "kbeacon-ota starting" 30 || true
 collect_logcat "kbeacon"
 assert_logcat "$LOGCAT_FILE" "kbeacon-ota starting" "app main ran"
 
+# The app opens on the permission page; the permissions were granted
+# via pm above, so tapping Request Permissions gets granted callbacks
+# and the app moves itself to the scanner page.
+tap_button "Request Permissions" || echo "WARNING: could not tap Request Permissions"
+wait_for_logcat "permissions granted" 20 || true
+LOGCAT_PERMS="$WORK_DIR/kbeacon_perms.txt"
+"$ADB" -s "$EMULATOR_SERIAL" logcat -d '*:I' > "$LOGCAT_PERMS" 2>&1 || true
+assert_logcat "$LOGCAT_PERMS" "permissions granted" \
+    "permission page advanced to the scanner"
+
 tap_button "Check Adapter" || echo "WARNING: could not tap Check Adapter"
 wait_for_logcat "BLE adapter: BleAdapterOn" 20 || true
 LOGCAT_ADAPTER="$WORK_DIR/kbeacon_adapter.txt"
@@ -236,6 +248,9 @@ else
     echo "PASS: decoy with a non-KKM address stayed hidden"
 fi
 assert_ui_text "Scanning: yes | 1 device(s) found" "UI shows one discovered device"
+# Battery 85 travels in the simulated 0x2080 service data and must
+# show on the row without connecting.
+assert_ui_text " | 85%" "battery percent shown from the advertisement"
 
 # Configure All stops the scan internally and reuses the list above,
 # so no third scan is started.
