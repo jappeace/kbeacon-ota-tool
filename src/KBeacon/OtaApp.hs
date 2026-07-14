@@ -99,6 +99,7 @@ import Hatter.Permission
   ( PermissionState
   , Permission(..)
   , PermissionStatus(..)
+  , checkPermission
   , requestPermission
   )
 import Hatter.Widget
@@ -106,13 +107,12 @@ import Hatter.Widget
   , InputType(..)
   , TextInputConfig(..)
   , Widget(..)
+  , coloredText
   , column
-  , defaultStyle
   , row
   , scrollColumn
   , text
   , button
-  , wsTextColor
   )
 import KBeacon.Configure
   ( BeaconOutcome(..)
@@ -172,6 +172,9 @@ data BeaconStatus
 -- share one handle.
 data AppState = AppState
   { statePage :: IORef AppPage
+  , statePermissionProbed :: IORef Bool
+    -- ^ Whether the first render already asked the platform if the
+    -- permissions are granted (the probe must run exactly once).
   , stateBeacons :: IORef [DiscoveredBeacon]
   , stateSeenAddresses :: IORef (Set Text)
   , stateAdvPeriodInput :: IORef Text
@@ -236,6 +239,7 @@ otaAppMain = do
 newAppState :: IO AppState
 newAppState = do
   page <- newIORef PermissionPage
+  permissionProbed <- newIORef False
   beacons <- newIORef []
   seen <- newIORef Set.empty
   advPeriod <- newIORef "1000"
@@ -250,6 +254,7 @@ newAppState = do
   redraw <- newIORef (pure ())
   pure AppState
     { statePage = page
+    , statePermissionProbed = permissionProbed
     , stateBeacons = beacons
     , stateSeenAddresses = seen
     , stateAdvPeriodInput = advPeriod
@@ -642,11 +647,38 @@ appView appState
         onCheckAdapter onRequestPerms onStartScan onStopScan onConfigureAll
         onPeriodChange onThresholdChange onReportUrlChange = do
   page <- readIORef (statePage appState)
-  case page of
+  resolvedPage <- case page of
+    PermissionPage -> resolvePermissionPage appState
+    ScannerPage -> pure ScannerPage
+  case resolvedPage of
     PermissionPage -> permissionPageView appState onRequestPerms
     ScannerPage -> scannerPageView appState
       onCheckAdapter onStartScan onStopScan onConfigureAll
       onPeriodChange onThresholdChange onReportUrlChange
+
+-- | On the first render, ask the platform whether both permissions
+-- are already granted and skip the permission page entirely if so.
+-- Probed at render time because the platform bridges are only
+-- registered right before the first render runs (jni_bridge.c wires
+-- them immediately before calling the view), and probed exactly once
+-- so a denial does not re-run the check on every redraw.
+resolvePermissionPage :: AppState -> IO AppPage
+resolvePermissionPage appState = do
+  alreadyProbed <- readIORef (statePermissionProbed appState)
+  if alreadyProbed
+    then pure PermissionPage
+    else do
+      writeIORef (statePermissionProbed appState) True
+      bluetoothStatus <- checkPermission PermissionBluetooth
+      locationStatus <- checkPermission PermissionLocation
+      case (bluetoothStatus, locationStatus) of
+        (PermissionGranted, PermissionGranted) -> do
+          platformLog "permissions already granted, skipping the permission page"
+          writeIORef (statePage appState) ScannerPage
+          pure ScannerPage
+        (PermissionDenied, PermissionDenied) -> pure PermissionPage
+        (PermissionDenied, PermissionGranted) -> pure PermissionPage
+        (PermissionGranted, PermissionDenied) -> pure PermissionPage
 
 -- | The one-time permission page; 'continuePastPermissions' replaces
 -- it with the scanner page once both permissions are granted.
@@ -683,6 +715,7 @@ scannerPageView appState
         , tiValue      = advPeriod
         , tiOnChange   = onPeriodChange
         , tiFontConfig = Nothing
+        , tiTextColor  = Nothing
         , tiAutoFocus  = False
         }
     , TextInput TextInputConfig
@@ -691,6 +724,7 @@ scannerPageView appState
         , tiValue      = threshold
         , tiOnChange   = onThresholdChange
         , tiFontConfig = Nothing
+        , tiTextColor  = Nothing
         , tiAutoFocus  = False
         }
     , TextInput TextInputConfig
@@ -699,6 +733,7 @@ scannerPageView appState
         , tiValue      = reportUrl
         , tiOnChange   = onReportUrlChange
         , tiFontConfig = Nothing
+        , tiTextColor  = Nothing
         , tiAutoFocus  = False
         }
     , row
@@ -752,18 +787,20 @@ rateColor verdict = case verdict of
   RateMatching -> Just (Color 0x2E 0x7D 0x32 0xFF)
   RateDeviating -> Just (Color 0xC6 0x28 0x28 0xFF)
 
--- | One row per discovered beacon, colored by its rate verdict.
+-- | One row per discovered beacon, its texts colored by the rate
+-- verdict.
 beaconRow :: Either Text AdvPeriodMs -> DiscoveredBeacon -> Widget
 beaconRow expectedPeriod beacon =
   let target = beaconTarget beacon
+      color = rateColor (rateVerdict expectedPeriod (beaconIntervalMs beacon))
       batteryText = case beaconBattery beacon of
         Just percent -> " | " <> pack (show percent) <> "%"
         Nothing -> ""
       rateText = case beaconIntervalMs beacon of
-        Just intervalMs -> " | ~" <> pack (show intervalMs) <> " ms"
+        Just intervalMs -> " | every ~" <> pack (show intervalMs) <> " ms"
         Nothing -> ""
       statusText = case beaconStatus beacon of
-        StatusFound -> "found"
+        StatusFound -> "not yet configured"
         StatusConfiguring -> "configuring..."
         StatusConfigured success ->
           "set to " <> pack (show (unAdvPeriodMs (successAppliedPeriod success))) <> " ms"
@@ -774,19 +811,24 @@ beaconRow expectedPeriod beacon =
       reportText = case beaconReportNote beacon of
         Just note -> " | " <> note
         Nothing -> ""
-      rowWidget = column
-        [ row
-            [ text (targetName target)
-            , text (" | " <> unBleDeviceAddress (targetAddress target))
-            , text (" | RSSI: " <> pack (show (beaconRssi beacon)))
-            -- Battery and rate are separate nodes so the emulator
-            -- test can exact-match the deterministic battery text
-            -- while the measured rate varies.
-            , text batteryText
-            , text rateText
-            ]
-        , text ("   " <> statusText <> reportText)
+  in column
+    [ row
+        [ rowText color (targetName target)
+        , rowText color (" | " <> unBleDeviceAddress (targetAddress target))
+        , rowText color (" | RSSI: " <> pack (show (beaconRssi beacon)))
+        -- Battery and rate are separate nodes so the emulator
+        -- test can exact-match the deterministic battery text
+        -- while the measured rate varies.
+        , rowText color batteryText
+        , rowText color rateText
         ]
-  in case rateColor (rateVerdict expectedPeriod (beaconIntervalMs beacon)) of
-    Nothing -> rowWidget
-    Just color -> Styled defaultStyle { wsTextColor = Just color } rowWidget
+    , rowText color ("   " <> statusText <> reportText)
+    ]
+
+-- | A row text fragment carrying the rate color when there is one.
+-- Text color lives on the text config itself (hatter #242), so it
+-- can only ever land on glyph-bearing nodes.
+rowText :: Maybe Color -> Text -> Widget
+rowText color content = case color of
+  Nothing -> text content
+  Just chosen -> coloredText chosen content
