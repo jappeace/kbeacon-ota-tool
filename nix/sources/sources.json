@@ -4,14 +4,14 @@
       "type": "Git",
       "repository": {
         "type": "GitHub",
-        "owner": "jappeace-sloth",
+        "owner": "jappeace",
         "repo": "hatter"
       },
-      "branch": "feat/width-style-property",
+      "branch": "master",
       "submodules": false,
-      "revision": "cea0a8022d0aa19af469e74d56c35900a3a0c612",
-      "url": "https://github.com/jappeace-sloth/hatter/archive/cea0a8022d0aa19af469e74d56c35900a3a0c612.tar.gz",
-      "hash": "sha256-DxGL2f7GSo4vEvfxGw8T/df7MZV/8gN+HHTZKBx+Kcw="
+      "revision": "a20ad8e84841b29fb8c94b36b37154efeed594dc",
+      "url": "https://github.com/jappeace/hatter/archive/a20ad8e84841b29fb8c94b36b37154efeed594dc.tar.gz",
+      "hash": "sha256-O4eoiudKphOf8W1N44+CW2h/AORWhT7kKTsY7940J1k="
     },
     "mobile-core-tools": {
       "type": "Git",
