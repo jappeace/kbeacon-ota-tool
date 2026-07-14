@@ -415,21 +415,32 @@ scanUiTests = testGroup "scan signal to ui"
       assertBool "device count reflects the discovery"
         (any (Text.isInfixOf "1 device(s) found") textsAfter)
   , testCase "the table sorts the strongest signal on top" $ do
+      -- Insertion order middle, strong, weak: the prepend accumulator
+      -- holds [weak, strong, middle] and its reverse [middle, strong,
+      -- weak], so neither an unsorted nor a merely-reversed list can
+      -- pass; only sorting by RSSI puts strong, middle, weak.
       (appState, _) <- newScannerAppState
       onScanResultAt 10 appState defaultRssiThreshold
-        androidKBeaconSignal { bsrRssi = -45 }
+        androidKBeaconSignal { bsrRssi = -40 }
       onScanResultAt 11 appState defaultRssiThreshold BleScanResult
         { bsrDeviceName = "KBPro-F4F5F6"
         , bsrDeviceAddress = BleDeviceAddress "FC:57:29:F4:F5:F6"
         , bsrRssi = -30
         , bsrAdvertisement = Right emptyBleAdvertisement
         }
+      onScanResultAt 12 appState defaultRssiThreshold BleScanResult
+        { bsrDeviceName = "KBPro-112233"
+        , bsrDeviceAddress = BleDeviceAddress "BC:57:29:11:22:33"
+        , bsrRssi = -45
+        , bsrAdvertisement = Right emptyBleAdvertisement
+        }
       texts <- renderedAppTexts appState
       let position serial = length (takeWhile (/= serial) texts)
-      assertBool "both serials rendered"
-        (elem "F4F5F6" texts && elem "4D5E6F" texts)
-      assertBool "stronger signal renders first"
-        (position "F4F5F6" < position "4D5E6F")
+      assertBool "all three serials rendered"
+        (elem "F4F5F6" texts && elem "4D5E6F" texts && elem "112233" texts)
+      assertBool "descending RSSI order"
+        (position "F4F5F6" < position "4D5E6F"
+          && position "4D5E6F" < position "112233")
   , testCase "a repeated advertisement refreshes the row, not duplicates it" $ do
       (appState, repaints) <- newScannerAppState
       onScanResultAt 10 appState defaultRssiThreshold androidKBeaconSignal
