@@ -30,6 +30,7 @@ import Hatter.Widget
   , TextConfig(..)
   , TextInputConfig(..)
   , Widget(..)
+  , wsWidth
   )
 import KBeacon.Configure (BeaconTarget(..))
 import KBeacon.Json
@@ -403,17 +404,61 @@ scanUiTests = testGroup "scan signal to ui"
       (appState, repaints) <- newScannerAppState
       textsBefore <- renderedAppTexts appState
       assertBool "beacon must not be listed before the signal"
-        (not (any (Text.isInfixOf "KBPro-4D5E6F") textsBefore))
+        (not (any (Text.isInfixOf "4D5E6F") textsBefore))
       onScanResultAt 10 appState defaultRssiThreshold androidKBeaconSignal
       repaintCount <- readIORef repaints
       assertEqual "repaints after the signal" 1 repaintCount
       textsAfter <- renderedAppTexts appState
-      assertBool "beacon row rendered after the signal"
-        (any (Text.isInfixOf "KBPro-4D5E6F") textsAfter)
-      assertBool "battery from the advertisement rendered"
-        (any (Text.isInfixOf "85%") textsAfter)
+      assertBool "serial cell rendered after the signal"
+        (elem "4D5E6F" textsAfter)
+      assertBool "battery cell from the advertisement rendered"
+        (elem "85" textsAfter)
       assertBool "device count reflects the discovery"
         (any (Text.isInfixOf "1 device(s) found") textsAfter)
+  , testCase "header and row cells share column widths" $ do
+      (appState, _) <- newScannerAppState
+      onScanResultAt 10 appState defaultRssiThreshold androidKBeaconSignal
+      onScanResultAt 11 appState defaultRssiThreshold BleScanResult
+        { bsrDeviceName = "KBPro-F4F5F6"
+        , bsrDeviceAddress = BleDeviceAddress "FC:57:29:F4:F5:F6"
+        , bsrRssi = -30
+        , bsrAdvertisement = Right emptyBleAdvertisement
+        }
+      widths <- fmap widgetWidths (renderedAppWidget appState)
+      assertEqual "four fixed columns in header and both rows"
+        12 (length widths)
+      let columnsOf index = take 4 (drop (index * 4) widths)
+      assertEqual "row one aligns with the header"
+        (columnsOf 0) (columnsOf 1)
+      assertEqual "row two aligns with the header"
+        (columnsOf 0) (columnsOf 2)
+  , testCase "the table sorts the strongest signal on top" $ do
+      -- Insertion order middle, strong, weak: the prepend accumulator
+      -- holds [weak, strong, middle] and its reverse [middle, strong,
+      -- weak], so neither an unsorted nor a merely-reversed list can
+      -- pass; only sorting by RSSI puts strong, middle, weak.
+      (appState, _) <- newScannerAppState
+      onScanResultAt 10 appState defaultRssiThreshold
+        androidKBeaconSignal { bsrRssi = -40 }
+      onScanResultAt 11 appState defaultRssiThreshold BleScanResult
+        { bsrDeviceName = "KBPro-F4F5F6"
+        , bsrDeviceAddress = BleDeviceAddress "FC:57:29:F4:F5:F6"
+        , bsrRssi = -30
+        , bsrAdvertisement = Right emptyBleAdvertisement
+        }
+      onScanResultAt 12 appState defaultRssiThreshold BleScanResult
+        { bsrDeviceName = "KBPro-112233"
+        , bsrDeviceAddress = BleDeviceAddress "BC:57:29:11:22:33"
+        , bsrRssi = -45
+        , bsrAdvertisement = Right emptyBleAdvertisement
+        }
+      texts <- renderedAppTexts appState
+      let position serial = length (takeWhile (/= serial) texts)
+      assertBool "all three serials rendered"
+        (elem "F4F5F6" texts && elem "4D5E6F" texts && elem "112233" texts)
+      assertBool "descending RSSI order"
+        (position "F4F5F6" < position "4D5E6F"
+          && position "4D5E6F" < position "112233")
   , testCase "a repeated advertisement refreshes the row, not duplicates it" $ do
       (appState, repaints) <- newScannerAppState
       onScanResultAt 10 appState defaultRssiThreshold androidKBeaconSignal
@@ -445,16 +490,16 @@ scanUiTests = testGroup "scan signal to ui"
       colorsMatching <- fmap widgetTextColors (renderedAppWidget appState)
       -- Every text node of the row must carry the color itself: a
       -- style on the row's container would change nothing visible.
-      assertEqual "all six row texts colored at the expected rate"
-        6 (length colorsMatching)
+      assertEqual "all five row cells colored at the expected rate"
+        5 (length colorsMatching)
       assertEqual "one uniform color" 1 (length (nub colorsMatching))
       (slowState, _) <- newScannerAppState
       writeIORef (stateAdvPeriodInput slowState) "1000"
       onScanResultAt 10 slowState defaultRssiThreshold androidKBeaconSignal
       onScanResultAt 15 slowState defaultRssiThreshold androidKBeaconSignal
       colorsDeviating <- fmap widgetTextColors (renderedAppWidget slowState)
-      assertEqual "all six row texts colored at a deviating rate"
-        6 (length colorsDeviating)
+      assertEqual "all five row cells colored at a deviating rate"
+        5 (length colorsDeviating)
       assertBool "matching and deviating rates color differently"
         (nub colorsMatching /= nub colorsDeviating)
   , testCase "rateVerdict tolerates jitter but flags another period" $ do
@@ -695,6 +740,24 @@ widgetTexts = \case
   MapView _ -> []
   Styled _ inner -> widgetTexts inner
   Animated _ inner -> widgetTexts inner
+
+-- | Every fixed width applied via Styled wrappers, in tree order;
+-- how column alignment is observed.
+widgetWidths :: Widget -> [Double]
+widgetWidths = \case
+  Text _ -> []
+  Button _ -> []
+  TextInput _ -> []
+  Column settings -> concatMap (widgetWidths . liWidget) (lsWidgets settings)
+  Row settings -> concatMap (widgetWidths . liWidget) (lsWidgets settings)
+  Stack items -> concatMap (widgetWidths . liWidget) items
+  Image _ -> []
+  WebView _ -> []
+  MapView _ -> []
+  Styled style inner -> case wsWidth style of
+    Just width -> width : widgetWidths inner
+    Nothing -> widgetWidths inner
+  Animated _ inner -> widgetWidths inner
 
 -- | Every text color carried by glyph-bearing widgets, in tree
 -- order; how the rate coloring is observed. Colors live on the
