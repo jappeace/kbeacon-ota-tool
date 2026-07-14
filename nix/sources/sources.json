@@ -4,13 +4,13 @@
       "type": "Git",
       "repository": {
         "type": "GitHub",
-        "owner": "jappeace-sloth",
+        "owner": "jappeace",
         "repo": "hatter"
       },
-      "branch": "feat/ble-advertisement-payloads",
+      "branch": "master",
       "submodules": false,
-      "revision": "079dadfcfa0ff5b980e534f0765eec0d4dcb6b98",
-      "url": "https://github.com/jappeace-sloth/hatter/archive/079dadfcfa0ff5b980e534f0765eec0d4dcb6b98.tar.gz",
+      "revision": "b08827fc90da85eea3f5a3efd7ec85cf1a36d395",
+      "url": "https://github.com/jappeace/hatter/archive/b08827fc90da85eea3f5a3efd7ec85cf1a36d395.tar.gz",
       "hash": "sha256-2we91fNLvzz2mL01zFraa5PXy/IN7vnJor/4CchPIyk="
     },
     "mobile-core-tools": {
