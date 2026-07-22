@@ -69,10 +69,12 @@ nix-build nix/ios-app.nix              # staged Xcode project (simulator)
 nix-build nix/ios-device-app.nix       # staged Xcode project (device)
 ```
 
-Or build, sign and install on a connected device in one go:
+Or stage a ready-to-open Xcode project for a connected device
+(signing and installing happen from the Xcode GUI):
 
 ```
 ./setup-ios.sh
+open ios-project/Hatter.xcodeproj
 ```
 
 iOS caveat: CoreBluetooth never exposes MAC addresses, but KBeacon

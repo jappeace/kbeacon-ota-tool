@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Set up kbeacon-ota on a connected iOS device.
-# Requires macOS with Xcode and Nix installed.
+# Prepare an Xcode project for kbeacon-ota on a real iOS device.
+# The user opens the generated project in Xcode and builds/installs from
+# there (device code signing requires the Xcode GUI).
 #
 # Usage:
 #   ./setup-ios.sh
@@ -9,42 +10,20 @@ set -euo pipefail
 
 result=$(nix-build nix/ios-device-app.nix)
 
-# Copy nix output to a writable directory (nix store is read-only)
-workdir=$(mktemp -d)
-cp -r "$result/share/ios/." "$workdir/"
-chmod -R u+w "$workdir"
+# Copy nix output to a stable in-repo directory (nix store is read-only)
+rm -rf ios-project
+cp -r "$result/share/ios/." ios-project/
+chmod -R u+w ios-project
 
-# Generate Xcode project and build
-cd "$workdir"
+# Clear Xcode's DerivedData for Hatter so stale build settings don't persist
+find ~/Library/Developer/Xcode/DerivedData -maxdepth 1 -name 'Hatter-*' -exec rm -rf {} + 2>/dev/null || true
+
+# Generate Xcode project
+cd ios-project
 xcodegen generate
 
-# Auto-discover Apple Development team ID from keychain.
-# The || true keeps set -e/pipefail from killing the script when grep
-# matches nothing, so the empty-TEAM_ID guard below can report it.
-TEAM_ID=$(security find-identity -v -p codesigning \
-  | grep "Apple Development" \
-  | head -1 \
-  | sed 's/.*(\(.*\)).*/\1/' \
-  || true)
-[ -z "$TEAM_ID" ] && echo "No Apple Development signing identity found in keychain" && exit 1
-echo "Using team ID: $TEAM_ID"
-
-xcodebuild -scheme Hatter \
-    -destination 'generic/platform=iOS' \
-    -configuration Debug \
-    -allowProvisioningUpdates \
-    ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
-    DEVELOPMENT_TEAM="$TEAM_ID" \
-    CODE_SIGN_STYLE=Automatic
-
-# Install on connected device
-# The || true keeps set -e from killing the script when the app is in
-# neither location, so the else branch below can point at Xcode.
-APP_PATH=$(ls -d "$workdir"/build/Build/Products/Debug-iphoneos/Hatter.app 2>/dev/null \
-  || ls -d DerivedData/Build/Products/Debug-iphoneos/Hatter.app 2>/dev/null \
-  || true)
-if [ -n "$APP_PATH" ]; then
-  ios-deploy --bundle "$APP_PATH" || echo "ios-deploy not found, open Xcode to install: open $workdir/Hatter.xcodeproj"
-else
-  echo "Build succeeded. Open Xcode to deploy: open $workdir/Hatter.xcodeproj"
-fi
+echo ""
+echo "Xcode project ready. Open it with:"
+echo "  open ios-project/Hatter.xcodeproj"
+echo ""
+echo "Then build and install from Xcode (Product → Run)."
