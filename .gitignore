@@ -4,3 +4,4 @@ result
 result-*
 cabal.project.local
 __pycache__/
+ios-project/
