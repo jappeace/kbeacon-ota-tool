@@ -10,6 +10,11 @@ let
   lib = import "${sources.hatter}/nix/lib.nix" { inherit sources; };
   iosLib = import ./ios.nix { inherit sources; simulator = false; };
 in
+# Despite its name, hatter's mkSimulatorApp is just the Xcode project
+# stager: it copies Swift sources, project.yml and the given static
+# library. Device vs simulator is decided by which library ios.nix
+# builds (simulator = false above). prrrrrrrrr's ios-device-app.nix
+# uses it the same way.
 lib.mkSimulatorApp {
   inherit iosLib;
   iosSrc = "${sources.hatter}/ios";
