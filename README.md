@@ -65,7 +65,14 @@ The iOS library and Xcode staging build on a Mac:
 ```
 nix-build nix/ios.nix                  # device library
 nix-build nix/ios.nix --arg simulator true
-nix-build nix/ios-app.nix              # staged Xcode project
+nix-build nix/ios-app.nix              # staged Xcode project (simulator)
+nix-build nix/ios-device-app.nix       # staged Xcode project (device)
+```
+
+Or build, sign and install on a connected device in one go:
+
+```
+./setup-ios.sh
 ```
 
 iOS caveat: CoreBluetooth never exposes MAC addresses, but KBeacon
